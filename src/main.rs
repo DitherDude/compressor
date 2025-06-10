@@ -20,55 +20,48 @@ fn main() {
     println!("data: {:?}", data);
     let mut tree = TreeView::new();
     println!("tree: {:#?}", tree);
-    for element in data.iter() {
-        for bit in 0..3 {
+    'outer: for element in data.iter() {
+        for bit in 0..2 {
             let bitvalue = (element >> (7 - bit)) & 1 == 1;
             println!("bit: {}", bitvalue);
-            traverse_tree(&mut tree, bitvalue);
+            if !traverse_tree(&mut tree, bitvalue) {
+                break 'outer;
+            }
             println!("tree: {:#?}", tree);
         }
     }
+    println!("tree: {:#?}", tree);
 }
 
 fn traverse_tree(tree: &mut TreeView, bit: bool) -> bool {
     if !match tree.data {
         NodeData::Empty => {
             tree.data = match bit {
-                true => NodeData::Tree(Box::new(TreeView {
-                    data: tree.data.clone(),
-                    next: NodeData::Value(0),
-                })),
+                true => NodeData::Value(0),
                 false => NodeData::Tree(Box::new(TreeView {
                     data: NodeData::Value(0),
-                    next: tree.data.clone(),
+                    next: NodeData::Empty,
                 })),
             };
             true
         }
         NodeData::Tree(ref mut subtree) => traverse_tree(subtree, bit),
-        _ => {
-            return false;
+        _ => false,
+    } && !match tree.next {
+        NodeData::Empty => {
+            tree.next = match bit {
+                true => NodeData::Value(0),
+                false => NodeData::Tree(Box::new(TreeView {
+                    data: NodeData::Value(0),
+                    next: NodeData::Empty,
+                })),
+            };
+            true
         }
+        NodeData::Tree(ref mut subtree) => traverse_tree(subtree, bit),
+        _ => false,
     } {
-        return match tree.next {
-            NodeData::Empty => {
-                tree.next = match bit {
-                    true => NodeData::Tree(Box::new(TreeView {
-                        data: tree.next.clone(),
-                        next: NodeData::Value(0),
-                    })),
-                    false => NodeData::Tree(Box::new(TreeView {
-                        data: NodeData::Value(0),
-                        next: tree.next.clone(),
-                    })),
-                };
-                true
-            }
-            NodeData::Tree(ref mut subtree) => traverse_tree(subtree, bit),
-            _ => {
-                return false;
-            }
-        };
+        return false;
     }
     true
 }
