@@ -18,13 +18,15 @@ fn main() {
     let data = &data[4..];
     println!("charlen: {}", charlen);
     let mut tree = TreeView::new();
+    let mut travel = Vec::new();
     'outer: for byte in data.iter() {
         for bit in 0..8 {
             let bitvalue = (byte >> (7 - bit)) & 1 == 1;
             if !traverse_tree(&mut tree, bitvalue) {
-                println!("EARLY TERMINATION!!!!!");
+                println!("Tree finished at {:?}", travel);
                 break 'outer;
             }
+            travel.push(if bitvalue { '1' } else { '0' });
         }
     }
     println!("tree: {:#?}", tree);
@@ -84,17 +86,4 @@ impl TreeView {
             next: NodeData::Empty,
         }
     }
-    // fn _push(mut self, data: NodeData) {
-    //     let new_node = Box::new(Node {
-    //         data,
-    //         next: NodeData::Tree(self),
-    //     });
-    //     self = LinkedList { head: new_node };
-    // }
-    // fn _pop(mut self) -> Option<NodeData> {
-    //     self.map(|node| {
-    //         self.head = node.next;
-    //         node.data
-    //     })
-    // }
 }
