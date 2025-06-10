@@ -17,17 +17,14 @@ fn main() {
     let charlen = u32::from_le_bytes(data[0..4].try_into().unwrap());
     let data = &data[4..];
     println!("charlen: {}", charlen);
-    println!("data: {:?}", data);
     let mut tree = TreeView::new();
-    println!("tree: {:#?}", tree);
-    'outer: for element in data.iter() {
-        for bit in 0..2 {
-            let bitvalue = (element >> (7 - bit)) & 1 == 1;
-            println!("bit: {}", bitvalue);
+    'outer: for byte in data.iter() {
+        for bit in 0..8 {
+            let bitvalue = (byte >> (7 - bit)) & 1 == 1;
             if !traverse_tree(&mut tree, bitvalue) {
+                println!("EARLY TERMINATION!!!!!");
                 break 'outer;
             }
-            println!("tree: {:#?}", tree);
         }
     }
     println!("tree: {:#?}", tree);
@@ -37,11 +34,8 @@ fn traverse_tree(tree: &mut TreeView, bit: bool) -> bool {
     if !match tree.data {
         NodeData::Empty => {
             tree.data = match bit {
-                true => NodeData::Value(0),
-                false => NodeData::Tree(Box::new(TreeView {
-                    data: NodeData::Value(0),
-                    next: NodeData::Empty,
-                })),
+                true => NodeData::Occupied,
+                false => NodeData::Tree(Box::new(TreeView::new())),
             };
             true
         }
@@ -50,11 +44,8 @@ fn traverse_tree(tree: &mut TreeView, bit: bool) -> bool {
     } && !match tree.next {
         NodeData::Empty => {
             tree.next = match bit {
-                true => NodeData::Value(0),
-                false => NodeData::Tree(Box::new(TreeView {
-                    data: NodeData::Value(0),
-                    next: NodeData::Empty,
-                })),
+                true => NodeData::Tree(Box::new(TreeView::new())),
+                false => NodeData::Occupied,
             };
             true
         }
@@ -69,6 +60,7 @@ fn traverse_tree(tree: &mut TreeView, bit: bool) -> bool {
 #[derive(Debug, Clone)]
 enum NodeData {
     Value(u32),
+    Occupied,
     Tree(Box<TreeView>),
     Empty,
 }
