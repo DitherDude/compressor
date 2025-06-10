@@ -18,96 +18,98 @@ fn main() {
     let data = &data[4..];
     println!("charlen: {}", charlen);
     println!("data: {:?}", data);
-    let mut tree = LinkedList::new();
-    // tree.head = Some(Box::new(Node {
-    //     data: NodeData::Null,
-    //     next: None,
-    // }));
-    for element in data.iter() {
-        for bit in 0..8 {
-            let bitvalue = (element >> (7 - bit)) & 1 == 1;
-            //println!("{:?}", bitvalue);
-            traverse_tree(&mut tree, bitvalue);
-        }
-    }
-}
-
-fn traverse_tree(tree: &mut LinkedList, bit: bool) {
+    let mut tree = TreeView::new();
     println!("tree: {:#?}", tree);
-    match tree.head.take().unwrap().data {
-        NodeData::List(mut list) => {
-            traverse_tree(&mut list, bit);
+    for element in data.iter() {
+        for bit in 0..3 {
+            let bitvalue = (element >> (7 - bit)) & 1 == 1;
+            println!("bit: {}", bitvalue);
+            traverse_tree(&mut tree, bitvalue);
+            println!("tree: {:#?}", tree);
         }
-        NodeData::Null => {
-            let new_node = match bit {
-                true => Box::new(Node {
-                    data: NodeData::List(Box::new(LinkedList {
-                        head: Some(Box::new(Node {
-                            data: tree.head.take().unwrap().data,
-                            next: tree.head.take().unwrap().next,
-                        })),
-                    })),
-                    next: Some(Box::new(Node {
-                        data: NodeData::Int(0),
-                        next: None,
-                    })),
-                }),
-                _ => Box::new(Node {
-                    data: NodeData::Int(0),
-                    next: Some(tree.head.take().unwrap()),
-                }),
-            };
-            tree.head = Some(new_node);
-        }
-        _ => {}
     }
 }
 
-#[derive(Debug)]
+fn traverse_tree(tree: &mut TreeView, bit: bool) -> bool {
+    if !match tree.data {
+        NodeData::Empty => {
+            tree.data = match bit {
+                true => NodeData::Tree(Box::new(TreeView {
+                    data: tree.data.clone(),
+                    next: NodeData::Value(0),
+                })),
+                false => NodeData::Tree(Box::new(TreeView {
+                    data: NodeData::Value(0),
+                    next: tree.data.clone(),
+                })),
+            };
+            true
+        }
+        NodeData::Tree(ref mut subtree) => traverse_tree(subtree, bit),
+        _ => {
+            return false;
+        }
+    } {
+        return match tree.next {
+            NodeData::Empty => {
+                tree.next = match bit {
+                    true => NodeData::Tree(Box::new(TreeView {
+                        data: tree.next.clone(),
+                        next: NodeData::Value(0),
+                    })),
+                    false => NodeData::Tree(Box::new(TreeView {
+                        data: NodeData::Value(0),
+                        next: tree.next.clone(),
+                    })),
+                };
+                true
+            }
+            NodeData::Tree(ref mut subtree) => traverse_tree(subtree, bit),
+            _ => {
+                return false;
+            }
+        };
+    }
+    true
+}
+
+#[derive(Debug, Clone)]
 enum NodeData {
-    Int(u32),
-    List(Box<LinkedList>),
-    Null,
+    Value(u32),
+    Tree(Box<TreeView>),
+    Empty,
 }
 
 impl NodeData {
     fn _is_null(&self) -> bool {
-        matches!(self, NodeData::Null)
+        matches!(self, NodeData::Empty)
     }
 }
 
-#[derive(Debug)]
-struct Node {
+#[derive(Debug, Clone)]
+struct TreeView {
     data: NodeData,
-    next: Option<Box<Node>>,
+    next: NodeData,
 }
 
-#[derive(Debug)]
-struct LinkedList {
-    head: Option<Box<Node>>,
-}
-
-impl LinkedList {
-    fn new() -> LinkedList {
-        //LinkedList { head: None }
-        LinkedList {
-            head: Some(Box::new(Node {
-                data: NodeData::Null,
-                next: None,
-            })),
+impl TreeView {
+    fn new() -> TreeView {
+        TreeView {
+            data: NodeData::Empty,
+            next: NodeData::Empty,
         }
     }
-    fn _push(&mut self, data: NodeData) {
-        let new_node = Box::new(Node {
-            data,
-            next: self.head.take(),
-        });
-        self.head = Some(new_node);
-    }
-    fn _pop(&mut self) -> Option<NodeData> {
-        self.head.take().map(|node| {
-            self.head = node.next;
-            node.data
-        })
-    }
+    // fn _push(mut self, data: NodeData) {
+    //     let new_node = Box::new(Node {
+    //         data,
+    //         next: NodeData::Tree(self),
+    //     });
+    //     self = LinkedList { head: new_node };
+    // }
+    // fn _pop(mut self) -> Option<NodeData> {
+    //     self.map(|node| {
+    //         self.head = node.next;
+    //         node.data
+    //     })
+    // }
 }
