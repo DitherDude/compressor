@@ -17,12 +17,12 @@ fn main() {
     let charlen = u32::from_le_bytes(data[0..4].try_into().unwrap());
     let data = &data[4..];
     println!("charlen: {}", charlen);
-    let mut tree = TreeView::new();
+    let mut tree = Tree::new();
     let mut travel = Vec::new();
     'outer: for byte in data.iter() {
         for bit in 0..8 {
             let bitvalue = (byte >> (7 - bit)) & 1 == 1;
-            if !traverse_tree(&mut tree, bitvalue) {
+            if !construct_tree(&mut tree, bitvalue) {
                 println!("Tree finished at {:?}", travel);
                 break 'outer;
             }
@@ -32,26 +32,26 @@ fn main() {
     println!("tree: {:#?}", tree);
 }
 
-fn traverse_tree(tree: &mut TreeView, bit: bool) -> bool {
-    if !match tree.data {
-        NodeData::Empty => {
-            tree.data = match bit {
-                true => NodeData::Occupied,
-                false => NodeData::Tree(Box::new(TreeView::new())),
+fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
+    if !match tree.head {
+        NodeType::Empty => {
+            tree.head = match bit {
+                true => NodeType::Data,
+                false => NodeType::Tree(Box::new(Tree::new())),
             };
             true
         }
-        NodeData::Tree(ref mut subtree) => traverse_tree(subtree, bit),
+        NodeType::Tree(ref mut subtree) => construct_tree(subtree, bit),
         _ => false,
-    } && !match tree.next {
-        NodeData::Empty => {
-            tree.next = match bit {
-                true => NodeData::Tree(Box::new(TreeView::new())),
-                false => NodeData::Occupied,
+    } && !match tree.tail {
+        NodeType::Empty => {
+            tree.tail = match bit {
+                true => NodeType::Tree(Box::new(Tree::new())),
+                false => NodeType::Data,
             };
             true
         }
-        NodeData::Tree(ref mut subtree) => traverse_tree(subtree, bit),
+        NodeType::Tree(ref mut subtree) => construct_tree(subtree, bit),
         _ => false,
     } {
         return false;
@@ -60,30 +60,30 @@ fn traverse_tree(tree: &mut TreeView, bit: bool) -> bool {
 }
 
 #[derive(Debug, Clone)]
-enum NodeData {
-    Value(u32),
-    Occupied,
-    Tree(Box<TreeView>),
+enum NodeType {
+    _Value(u32),
+    Data,
+    Tree(Box<Tree>),
     Empty,
 }
 
-impl NodeData {
+impl NodeType {
     fn _is_null(&self) -> bool {
-        matches!(self, NodeData::Empty)
+        matches!(self, NodeType::Empty)
     }
 }
 
 #[derive(Debug, Clone)]
-struct TreeView {
-    data: NodeData,
-    next: NodeData,
+struct Tree {
+    head: NodeType,
+    tail: NodeType,
 }
 
-impl TreeView {
-    fn new() -> TreeView {
-        TreeView {
-            data: NodeData::Empty,
-            next: NodeData::Empty,
+impl Tree {
+    fn new() -> Tree {
+        Tree {
+            head: NodeType::Empty,
+            tail: NodeType::Empty,
         }
     }
 }
