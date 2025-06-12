@@ -28,7 +28,7 @@ fn main() {
             match mode {
                 0 => {
                     construct_tree(&mut tree, bitvalue);
-                    if check_tree(&tree, &|n| matches!(n, NodeType::Empty)) {
+                    if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
                         print!("\rConstructing tree... Done!\nPopulating tree...");
                         mode = 1;
                     }
@@ -40,7 +40,7 @@ fn main() {
                     if tmpval.len() == charlen as usize {
                         fill_tree(&mut tree, &tmpval);
                         tmpval = Vec::new();
-                        if check_tree(&tree, &|n| matches!(n, NodeType::Data)) {
+                        if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
                             print!("\rPopulating tree... Done!\n");
                             mode = 2;
                         }
@@ -114,15 +114,12 @@ fn fill_tree(tree: &mut Tree, data: &[bool]) -> bool {
     true
 }
 
-fn check_tree<F>(tree: &Tree, is_bad: &F) -> bool
-where
-    F: Fn(&NodeType) -> bool,
-{
-    [&tree.head, &tree.tail].iter().all(|node| {
-        if is_bad(node) {
+fn check_tree(tree: &Tree, node: &mut impl FnMut(&NodeType) -> bool) -> bool {
+    [&tree.head, &tree.tail].iter().all(|nodetype| {
+        if node(nodetype) {
             false
-        } else if let NodeType::Tree(subtree) = node {
-            check_tree(subtree, is_bad)
+        } else if let NodeType::Tree(subtree) = nodetype {
+            check_tree(subtree, node)
         } else {
             true
         }
