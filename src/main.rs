@@ -1,6 +1,7 @@
 use std::{env, fs::File, io::Read};
 
 fn main() {
+    println!("On your marks...");
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         println!("Missing filename!");
@@ -16,18 +17,19 @@ fn main() {
     };
     let charlen = u32::from_le_bytes(data[0..4].try_into().unwrap());
     let data = &data[4..];
-    //println!("charlen: {}", charlen);
     let mut tree = Tree::new();
     let mut cursor = 0usize;
     let mut tmpval = Vec::new();
     let mut mode = 0u8;
+    print!("Constructing tree...");
     loop {
         for bit in 0..8 {
             let bitvalue = (data[cursor] >> (7 - bit)) & 1 == 1;
             match mode {
                 0 => {
                     construct_tree(&mut tree, bitvalue);
-                    if check_tree_e(&tree) {
+                    if check_tree(&tree, &|n| matches!(n, NodeType::Empty)) {
+                        print!("\rConstructing tree... Done!\nPopulating tree...");
                         mode = 1;
                     }
                 }
@@ -38,7 +40,8 @@ fn main() {
                     if tmpval.len() == charlen as usize {
                         fill_tree(&mut tree, &tmpval);
                         tmpval = Vec::new();
-                        if check_tree_d(&tree) {
+                        if check_tree(&tree, &|n| matches!(n, NodeType::Data)) {
+                            print!("\rPopulating tree... Done!\n");
                             mode = 2;
                         }
                     }
@@ -111,31 +114,19 @@ fn fill_tree(tree: &mut Tree, data: &[bool]) -> bool {
     true
 }
 
-fn check_tree_e(tree: &Tree) -> bool {
-    let head = match &tree.head {
-        NodeType::Empty => false,
-        NodeType::Tree(subtree) => check_tree_e(subtree),
-        _ => true,
-    };
-    let tail = match &tree.tail {
-        NodeType::Empty => false,
-        NodeType::Tree(subtree) => check_tree_e(subtree),
-        _ => true,
-    };
-    head && tail
-}
-fn check_tree_d(tree: &Tree) -> bool {
-    let head = match &tree.head {
-        NodeType::Data => false,
-        NodeType::Tree(subtree) => check_tree_d(subtree),
-        _ => true,
-    };
-    let tail = match &tree.tail {
-        NodeType::Data => false,
-        NodeType::Tree(subtree) => check_tree_d(subtree),
-        _ => true,
-    };
-    head && tail
+fn check_tree<F>(tree: &Tree, is_bad: &F) -> bool
+where
+    F: Fn(&NodeType) -> bool,
+{
+    [&tree.head, &tree.tail].iter().all(|node| {
+        if is_bad(node) {
+            false
+        } else if let NodeType::Tree(subtree) = node {
+            check_tree(subtree, is_bad)
+        } else {
+            true
+        }
+    })
 }
 
 fn read_tree(tree: &Tree, path: &[bool]) -> Option<Vec<bool>> {
