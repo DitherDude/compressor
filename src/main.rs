@@ -16,24 +16,41 @@ fn main() {
         }
     };
     let charlen = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    let mut trimmer = 9u8;
     let data = &data[4..];
     let mut tree = Tree::new();
     let mut cursor = 0usize;
     let mut tmpval = Vec::new();
     let mut mode = 0u8;
-    print!("Constructing tree...");
+    let mut maxsize = 8u8;
     loop {
-        for bit in 0..8 {
+        for bit in 0..maxsize {
             let bitvalue = (data[cursor] >> (7 - bit)) & 1 == 1;
             match mode {
                 0 => {
-                    construct_tree(&mut tree, bitvalue);
-                    if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
-                        print!("\rConstructing tree... Done!\nPopulating tree...");
+                    if trimmer == 9u8 {
+                        trimmer = 8u8;
+                        continue;
+                    }
+                    if trimmer == 8u8 {
+                        let bit1 = (data[cursor] >> (8 - bit)) & 1;
+                        let bit3 = (data[cursor] >> (5 - bit)) & 1;
+                        trimmer = (bit1) << 2 | (bitvalue as u8) << 1 | (bit3);
+                        continue;
+                    } else {
+                        print!("Constructing tree...");
                         mode = 1;
+                        continue;
                     }
                 }
                 1 => {
+                    construct_tree(&mut tree, bitvalue);
+                    if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
+                        print!("\rConstructing tree... Done!\nPopulating tree...");
+                        mode = 2;
+                    }
+                }
+                2 => {
                     if tmpval.len() < charlen as usize {
                         tmpval.push(bitvalue);
                     }
@@ -42,11 +59,11 @@ fn main() {
                         tmpval = Vec::new();
                         if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
                             print!("\rPopulating tree... Done!\n");
-                            mode = 2;
+                            mode = 3;
                         }
                     }
                 }
-                2 => {
+                3 => {
                     tmpval.push(bitvalue);
                     match read_tree(&tree, &tmpval) {
                         Some(x) => writeval(&x),
@@ -59,6 +76,9 @@ fn main() {
         }
         if data.len() > cursor + 1 {
             cursor += 1;
+            if data.len() == cursor + 1 {
+                maxsize = trimmer;
+            }
         } else {
             println!();
             return;
