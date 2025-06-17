@@ -127,6 +127,7 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
 }
 
 fn _compress_data(_data: &[u8]) -> Vec<usize> {
+    println!("Compression not yet implemented!");
     Vec::new()
 }
 
