@@ -3,19 +3,59 @@ use std::{env, fs::File, io::Read};
 fn main() {
     println!("On your marks...");
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        println!("Missing filename!");
-        return;
-    }
-    let mut data = Vec::new();
-    let _ = match File::open(&args[1]) {
-        Ok(mut f) => f.read_to_end(&mut data),
+    let filename = match args.iter().position(|x| x == "-i" || x == "--input") {
+        Some(x) => &args[x + 1],
+        None => {
+            println!("Missing filename!");
+            return;
+        }
+    };
+    let compression = match args
+        .iter()
+        .any(|x| x == "-c" || x == "--compress" || x == "--deflate")
+    {
+        true => {
+            if args
+                .iter()
+                .any(|y| y == "-d" || y == "--decompress" || y == "--inflate")
+            {
+                println!("Cannot compress and decompress at the same time!");
+                return;
+            } else {
+                true
+            }
+        }
+        false => {
+            if args
+                .iter()
+                .any(|y| y == "-d" || y == "--decompress" || y == "--inflate")
+            {
+                false
+            } else {
+                println!("Missing de/compression flag!");
+                return;
+            }
+        }
+    };
+    let mut rawdata = Vec::new();
+    let _ = match File::open(filename) {
+        Ok(mut f) => f.read_to_end(&mut rawdata),
         Err(e) => {
             println!("Error opening file: {}", e);
             return;
         }
     };
-    let charlen = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    let data = match compression {
+        true => _compress_data(&rawdata),
+        false => decompress_data(&rawdata),
+    };
+    let usablebytes = to_workable_bytes(&data);
+    println!("Result: {}", String::from_utf8_lossy(&usablebytes));
+}
+
+fn decompress_data(data: &[u8]) -> Vec<usize> {
+    let mut finaldata = Vec::new();
+    let blocklen = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
     let mut trimmer = 9u8;
     let data = &data[4..];
     let mut tree = Tree::new();
@@ -51,10 +91,10 @@ fn main() {
                     }
                 }
                 2 => {
-                    if tmpval.len() < charlen as usize {
+                    if tmpval.len() < blocklen {
                         tmpval.push(bitvalue);
                     }
-                    if tmpval.len() == charlen as usize {
+                    if tmpval.len() == blocklen {
                         fill_tree(&mut tree, &tmpval);
                         tmpval = Vec::new();
                         if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
@@ -66,7 +106,7 @@ fn main() {
                 3 => {
                     tmpval.push(bitvalue);
                     match read_tree(&tree, &tmpval) {
-                        Some(x) => writeval(&x),
+                        Some(x) => finaldata.push(getval(&x)),
                         _ => continue,
                     }
                     tmpval = Vec::new();
@@ -80,10 +120,14 @@ fn main() {
                 maxsize = trimmer;
             }
         } else {
-            println!();
-            return;
+            break;
         }
     }
+    finaldata
+}
+
+fn _compress_data(_data: &[u8]) -> Vec<usize> {
+    Vec::new()
 }
 
 fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
@@ -161,11 +205,39 @@ fn read_tree(tree: &Tree, path: &[bool]) -> Option<Vec<bool>> {
     }
 }
 
-fn writeval(data: &[bool]) {
-    let char = data
-        .iter()
-        .fold(0, |acc, &x| (acc << 1) | (if x { 1u8 } else { 0u8 }));
-    print!("{}", String::from_utf8_lossy(&[char]));
+fn getval(data: &[bool]) -> usize {
+    data.iter()
+        .fold(0, |acc, &x| (acc << 1) | (if x { 1usize } else { 0usize }))
+}
+
+fn to_workable_bytes(data: &[usize]) -> Vec<u8> {
+    let mut result = Vec::new();
+    let mut remaining = [0; 8];
+    let mut remaining_len = 0;
+
+    for num in data {
+        let num_bytes = num.to_be_bytes();
+        if remaining_len > 0 {
+            let mut combined = [0; 8];
+            combined[..remaining_len].copy_from_slice(&remaining);
+            combined[remaining_len..].copy_from_slice(&num_bytes[..8 - remaining_len]);
+            result.push(combined);
+            remaining_len = 0;
+            remaining = [0; 8];
+        }
+        for chunk in num_bytes.chunks(8) {
+            if chunk.len() == 8 {
+                result.push(chunk.try_into().unwrap());
+            } else {
+                remaining.copy_from_slice(chunk);
+                remaining_len = chunk.len();
+            }
+        }
+    }
+    if remaining_len > 0 {
+        result.push(remaining);
+    }
+    result.concat()
 }
 
 #[derive(Debug, Clone)]
