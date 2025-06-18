@@ -55,42 +55,61 @@ fn main() {
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
     let mut finaldata = Vec::new();
-    let blocklen = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+    // let blocklen = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+    let mut blockbytes = 6u8;
+    let mut blocklen = 0usize;
     let mut trimmer = 9u8;
-    let data = &data[4..];
+    //let data = &data[4..];
     let mut tree = Tree::new();
-    let mut cursor = 0usize;
+    let mut byte = 0usize;
     let mut tmpval = Vec::new();
     let mut mode = 0u8;
     let mut maxsize = 8u8;
     loop {
         for bit in 0..maxsize {
-            let bitvalue = (data[cursor] >> (7 - bit)) & 1 == 1;
+            let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
             match mode {
                 0 => {
-                    if trimmer == 9u8 {
-                        trimmer = 8u8;
+                    if blockbytes == 6u8 {
+                        blockbytes = 5u8;
                         continue;
-                    }
-                    if trimmer == 8u8 {
-                        let bit1 = (data[cursor] >> (8 - bit)) & 1;
-                        let bit3 = (data[cursor] >> (5 - bit)) & 1;
-                        trimmer = (bit1) << 2 | (bitvalue as u8) << 1 | (bit3);
-                        continue;
-                    } else {
-                        print!("Constructing tree...");
+                    } else if blockbytes == 5u8 {
+                        let bit1 = (data[byte] >> (8 - bit)) & 1;
+                        blockbytes = ((bit1) << 1 | (bitvalue as u8)) + 1;
+                        let mut result = vec![0u8; 4];
+                        for i in 0..blockbytes {
+                            let microdata = u16::from_le_bytes([data[byte], data[byte + 1]]);
+                            result[i as usize] = (microdata << 2).to_le_bytes()[0];
+                            byte += 1;
+                        }
+                        blocklen = u32::from_le_bytes(result.try_into().unwrap()) as usize;
                         mode = 1;
                         continue;
                     }
                 }
                 1 => {
-                    construct_tree(&mut tree, bitvalue);
-                    if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
-                        print!("\rConstructing tree... Done!\nPopulating tree...");
+                    if trimmer == 9u8 {
+                        trimmer = 8u8;
+                        continue;
+                    } else if trimmer == 8u8 {
+                        let bit1 = (data[byte] >> (7 - bit)) & 1;
+                        let bit3 = (data[byte] >> (5 - bit)) & 1;
+                        trimmer = (bit1) << 2 | (bitvalue as u8) << 1 | (bit3);
+                        continue;
+                    } else {
+                        print!("Constructing tree...");
                         mode = 2;
+                        continue;
                     }
                 }
                 2 => {
+                    construct_tree(&mut tree, bitvalue);
+                    if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
+                        print!("\rConstructing tree... Done!\nPopulating tree...");
+                        mode = 3;
+                    }
+                }
+                3 => {
                     if tmpval.len() < blocklen {
                         tmpval.push(bitvalue);
                     }
@@ -99,11 +118,11 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
                         tmpval = Vec::new();
                         if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
                             print!("\rPopulating tree... Done!\n");
-                            mode = 3;
+                            mode = 4;
                         }
                     }
                 }
-                3 => {
+                4 => {
                     tmpval.push(bitvalue);
                     match read_tree(&tree, &tmpval) {
                         Some(x) => finaldata.push(getval(&x)),
@@ -114,9 +133,9 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
                 _ => {}
             }
         }
-        if data.len() > cursor + 1 {
-            cursor += 1;
-            if data.len() == cursor + 1 {
+        if data.len() > byte + 1 {
+            byte += 1;
+            if data.len() == byte + 1 {
                 maxsize = trimmer;
             }
         } else {
