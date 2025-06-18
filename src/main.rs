@@ -55,11 +55,9 @@ fn main() {
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
     let mut finaldata = Vec::new();
-    // let blocklen = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
     let mut blockbytes = 6u8;
     let mut blocklen = 0usize;
     let mut trimmer = 9u8;
-    //let data = &data[4..];
     let mut tree = Tree::new();
     let mut byte = 0usize;
     let mut tmpval = Vec::new();
