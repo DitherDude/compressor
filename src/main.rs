@@ -77,7 +77,7 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
                         let mut result = vec![0u8; 4];
                         for i in 0..blockbytes {
                             let microdata = u16::from_le_bytes([data[byte], data[byte + 1]]);
-                            result[i as usize] = (microdata << 2).to_le_bytes()[0];
+                            result[i as usize] = (microdata << (bit + 1)).to_le_bytes()[0];
                             byte += 1;
                         }
                         blocklen = u32::from_le_bytes(result.try_into().unwrap()) as usize;
