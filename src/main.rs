@@ -10,6 +10,7 @@ fn main() {
             return;
         }
     };
+    let mut blocksize = 0u32;
     let compression = match args
         .iter()
         .any(|x| x == "-c" || x == "--compress" || x == "--deflate")
@@ -22,6 +23,26 @@ fn main() {
                 println!("Cannot compress and decompress at the same time!");
                 return;
             } else {
+                match args.iter().position(|x| x == "-b" || x == "--blocksize") {
+                    Some(x) => match args[x + 1].parse::<u32>() {
+                        Ok(x) => {
+                            if x < 1 {
+                                println!("Block size is too small!");
+                                return;
+                            }
+                            blocksize = x;
+                            true
+                        }
+                        Err(_) => {
+                            println!("Invalid block size!");
+                            return;
+                        }
+                    },
+                    None => {
+                        println!("Missing block size!");
+                        return;
+                    }
+                };
                 true
             }
         }
@@ -46,11 +67,11 @@ fn main() {
         }
     };
     let data = match compression {
-        true => _compress_data(&rawdata),
-        false => decompress_data(&rawdata),
+        true => compress_data(&rawdata, blocksize),
+        false => to_workable_bytes(&decompress_data(&rawdata)),
     };
-    let usablebytes = to_workable_bytes(&data);
-    println!("Result: {}", String::from_utf8_lossy(&usablebytes));
+    //let usablebytes = to_workable_bytes(&data);
+    println!("Result: {}", String::from_utf8_lossy(&data));
 }
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
@@ -143,31 +164,54 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
     finaldata
 }
 
-fn _compress_data(data: &[u8]) -> Vec<usize> {
+fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     println!("Compression not yet implemented!");
-    let byte = 0usize;
-    let mut mode = 0u8;
-    let mut blockbytes = 6u8;
-    loop {
-        for bit in 0..8u8 {
-            let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
-            match mode {
-                0 => {
-                    if blockbytes == 6u8 {
-                        blockbytes = 5u8;
-                        continue;
-                    } else if blockbytes == 5u8 {
-                        let bit1 = (data[byte] >> (8 - bit)) & 1;
+    let mut finaldata = Vec::<[bool; 8]>::new();
+    finaldata.push([false; 8]);
+    // let byte = 0usize;
+    // let mut mode = 0u8;
+    //let mut blockbytes = 6u8;
+    let blocked_blockbytes = chunksize.to_le_bytes();
+    println!("Blocked blockbytes: {:?}", blocked_blockbytes);
+    if blocked_blockbytes[1] == 0 {
+        finaldata[0][0] = false;
+        finaldata[0][1] = false;
+    } else if blocked_blockbytes[2] == 0 {
+        finaldata[0][0] = false;
+        finaldata[0][1] = true;
+    } else if blocked_blockbytes[3] == 0 {
+        finaldata[0][0] = true;
+        finaldata[0][1] = false;
+    } else {
+        finaldata[0][0] = true;
+        finaldata[0][1] = true;
+    }
+    let mut dictionary = Vec::<Dictionary>::new();
+    let mut block = Vec::<bool>::new();
+    for byte in data.chunks(chunksize as usize) {
+        for bit in 0..8 {
+            let bitvalue = (byte[0] >> (7 - bit)) & 1 == 1;
+            block.push(bitvalue);
+            if block.len() == chunksize as usize {
+                match dictionary.iter().position(|x| x.key == block) {
+                    Some(x) => dictionary[x].value += 1,
+                    None => {
+                        dictionary.push(Dictionary::new(block, 1));
                     }
                 }
-                1 => {
-                    break;
-                }
-                _ => {}
+                block = Vec::new();
             }
         }
     }
-    Vec::new()
+    println!("Dictionary: {:#?}", dictionary);
+    finaldata
+        .iter()
+        .map(|array| {
+            array
+                .iter()
+                .fold(0, |acc, &x| (acc << 1) | (if x { 1 } else { 0 }))
+        })
+        .collect()
 }
 
 fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
@@ -306,5 +350,17 @@ impl Tree {
             head: NodeType::Empty,
             tail: NodeType::Empty,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Dictionary {
+    key: Vec<bool>,
+    value: usize,
+}
+
+impl Dictionary {
+    fn new(key: Vec<bool>, value: usize) -> Dictionary {
+        Dictionary { key, value }
     }
 }
