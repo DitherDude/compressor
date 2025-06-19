@@ -214,7 +214,7 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     }
     let mut tmpdictionary = Vec::new();
     while dictionary.len() > 1 {
-        for (i, chunk) in dictionary.chunks(2).enumerate() {
+        for chunk in dictionary.chunks(2) {
             if chunk.len() == 2 {
                 let node1 = chunk[0].key.clone();
                 let node2 = chunk[1].key.clone();
@@ -233,7 +233,12 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
         tmpdictionary = Vec::new();
     }
     let tree = &dictionary[0].key;
+    let construction = match tree {
+        NodeType::Tree(subtree) => deconstruct_tree(subtree),
+        _ => [false].to_vec(),
+    };
     println!("Dictionary: {:#?}", tree);
+    println!("COnstructon: {:?}", construction);
     finaldata
         .iter()
         .map(|array| {
@@ -269,6 +274,20 @@ fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
         return false;
     }
     true
+}
+
+fn deconstruct_tree(tree: &Tree) -> Vec<bool> {
+    let head = match &tree.head {
+        NodeType::Value(_) => vec![true],
+        NodeType::Tree(subtree) => [vec![false], deconstruct_tree(subtree)].concat(),
+        _ => Vec::new(),
+    };
+    let tail = match &tree.tail {
+        NodeType::Value(_) => vec![false],
+        NodeType::Tree(subtree) => [vec![true], deconstruct_tree(subtree)].concat(),
+        _ => Vec::new(),
+    };
+    [head, tail].concat()
 }
 
 fn fill_tree(tree: &mut Tree, data: &[bool]) -> bool {
