@@ -196,11 +196,11 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             if block.len() == chunksize as usize {
                 match dictionary
                     .iter()
-                    .position(|x| x.key == NodeType::Value(block.clone()))
+                    .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
                 {
                     Some(x) => dictionary[x].value += 1,
                     None => {
-                        dictionary.push(Dictionary::new(block, 1));
+                        dictionary.push(Dictionary::newval(block, 1));
                     }
                 }
                 block = Vec::new();
@@ -212,8 +212,28 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             break;
         }
     }
-    dictionary.sort_by_key(|x| x.value);
-    println!("Dictionary: {:#?}", dictionary);
+    let mut tmpdictionary = Vec::new();
+    while dictionary.len() > 1 {
+        for (i, chunk) in dictionary.chunks(2).enumerate() {
+            if chunk.len() == 2 {
+                let node1 = chunk[0].key.clone();
+                let node2 = chunk[1].key.clone();
+                let value = chunk[0].value + chunk[1].value;
+                let key = Tree {
+                    head: node1,
+                    tail: node2,
+                };
+                tmpdictionary.push(Dictionary::newtree(key, value));
+            } else {
+                tmpdictionary.push(chunk[0].clone());
+            }
+        }
+        dictionary = tmpdictionary;
+        dictionary.sort_by_key(|x| x.value);
+        tmpdictionary = Vec::new();
+    }
+    let tree = &dictionary[0].key;
+    println!("Dictionary: {:#?}", tree);
     finaldata
         .iter()
         .map(|array| {
@@ -388,9 +408,15 @@ struct Dictionary {
 }
 
 impl Dictionary {
-    fn new(key: Vec<bool>, value: usize) -> Dictionary {
+    fn newval(key: Vec<bool>, value: usize) -> Dictionary {
         Dictionary {
             key: NodeType::Value(key),
+            value,
+        }
+    }
+    fn newtree(key: Tree, value: usize) -> Dictionary {
+        Dictionary {
+            key: NodeType::Tree(Box::new(key)),
             value,
         }
     }
