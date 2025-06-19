@@ -90,8 +90,8 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
                         trimmer = 8u8;
                         continue;
                     } else if trimmer == 8u8 {
-                        let bit1 = (data[byte] >> (7 - bit)) & 1;
-                        let bit3 = (data[byte] >> (5 - bit)) & 1;
+                        let bit1 = (data[byte] >> (8 - bit)) & 1;
+                        let bit3 = (data[byte] >> (6 - bit)) & 1;
                         trimmer = (bit1) << 2 | (bitvalue as u8) << 1 | (bit3);
                         continue;
                     } else {
@@ -134,7 +134,7 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
         if data.len() > byte + 1 {
             byte += 1;
             if data.len() == byte + 1 {
-                maxsize = trimmer;
+                maxsize = 8 - trimmer;
             }
         } else {
             break;
@@ -143,8 +143,30 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
     finaldata
 }
 
-fn _compress_data(_data: &[u8]) -> Vec<usize> {
+fn _compress_data(data: &[u8]) -> Vec<usize> {
     println!("Compression not yet implemented!");
+    let byte = 0usize;
+    let mut mode = 0u8;
+    let mut blockbytes = 6u8;
+    loop {
+        for bit in 0..8u8 {
+            let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
+            match mode {
+                0 => {
+                    if blockbytes == 6u8 {
+                        blockbytes = 5u8;
+                        continue;
+                    } else if blockbytes == 5u8 {
+                        let bit1 = (data[byte] >> (8 - bit)) & 1;
+                    }
+                }
+                1 => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
     Vec::new()
 }
 
