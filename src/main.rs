@@ -188,12 +188,16 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     }
     let mut dictionary = Vec::<Dictionary>::new();
     let mut block = Vec::<bool>::new();
-    for byte in data.chunks(chunksize as usize) {
+    let mut byte = 0usize;
+    loop {
         for bit in 0..8 {
-            let bitvalue = (byte[0] >> (7 - bit)) & 1 == 1;
+            let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
             block.push(bitvalue);
             if block.len() == chunksize as usize {
-                match dictionary.iter().position(|x| x.key == block) {
+                match dictionary
+                    .iter()
+                    .position(|x| x.key == NodeType::Value(block.clone()))
+                {
                     Some(x) => dictionary[x].value += 1,
                     None => {
                         dictionary.push(Dictionary::new(block, 1));
@@ -202,7 +206,13 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
                 block = Vec::new();
             }
         }
+        if data.len() > byte + 1 {
+            byte += 1;
+        } else {
+            break;
+        }
     }
+    dictionary.sort_by_key(|x| x.value);
     println!("Dictionary: {:#?}", dictionary);
     finaldata
         .iter()
@@ -338,6 +348,18 @@ impl NodeType {
     }
 }
 
+impl PartialEq for NodeType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (NodeType::Value(a), NodeType::Value(b)) => a == b,
+            (NodeType::Data, NodeType::Data) => true,
+            (NodeType::Tree(a), NodeType::Tree(b)) => a == b,
+            (NodeType::Empty, NodeType::Empty) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Tree {
     head: NodeType,
@@ -353,14 +375,23 @@ impl Tree {
     }
 }
 
+impl PartialEq for Tree {
+    fn eq(&self, other: &Self) -> bool {
+        self.head == other.head && self.tail == other.tail
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Dictionary {
-    key: Vec<bool>,
+    key: NodeType,
     value: usize,
 }
 
 impl Dictionary {
     fn new(key: Vec<bool>, value: usize) -> Dictionary {
-        Dictionary { key, value }
+        Dictionary {
+            key: NodeType::Value(key),
+            value,
+        }
     }
 }
