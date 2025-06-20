@@ -186,6 +186,7 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
 }
 
 fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
+    print!("Reading metadata...");
     let blocked_blockbytes = chunksize.to_le_bytes();
     let bbl: u8;
     let blockbytes = if blocked_blockbytes[1] == 0 {
@@ -214,6 +215,8 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     let mut dictionary = Vec::<Dictionary>::new();
     let mut block = Vec::<bool>::new();
     let mut byte = 0usize;
+    print!("\rReading metadata... Done!\nConstructing lookup table... (0/2)");
+    let _ = std::io::stdout().flush();
     loop {
         for bit in 0..8 {
             let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
@@ -237,6 +240,8 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             break;
         }
     }
+    print!("\rnConstructing lookup table... (1/2)");
+    let _ = std::io::stdout().flush();
     let mut tmpdictionary = Vec::new();
     while dictionary.len() > 1 {
         for chunk in dictionary.chunks(2) {
@@ -264,6 +269,8 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             tail: NodeType::Empty,
         },
     };
+    print!("\rConstructing lookup table... (2/2)\nWalking paths...");
+    let _ = std::io::stdout().flush();
     let tree_construction = deconstruct_tree(tree);
     let tree_values = concat_tree(tree);
     let mut tree_paths: Vec<bool> = Vec::new();
@@ -281,6 +288,7 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             }
         }
     }
+    println!("\rWalking paths... Done!\nCompiling results...");
     let mut iremainder = 2;
     iremainder = (tree_construction.len() + iremainder) % 8;
     iremainder = (tree_values.len() + iremainder) % 8;
