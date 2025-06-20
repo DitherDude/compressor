@@ -71,6 +71,7 @@ fn main() {
         false => to_workable_bytes(&decompress_data(&rawdata)),
     };
     //let usablebytes = to_workable_bytes(&data);
+    println!("{:?}", data);
     println!("Result: {}", String::from_utf8_lossy(&data));
 }
 
@@ -166,41 +167,32 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
 
 fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     println!("Compression not yet implemented!");
-    let mut finaldata = Vec::<[bool; 8]>::new();
-    finaldata.push([false; 8]);
-    let mut byte = 0usize;
-    let mut bit = 2u8;
-    // let byte = 0usize;
-    // let mut mode = 0u8;
-    //let mut blockbytes = 6u8;
+    //let mut finaldata = Vec::<[bool; 8]>::new();
+    //finaldata.push([false; 8]);
     let blocked_blockbytes = chunksize.to_le_bytes();
-    let mut bbl = 0u8;
+    let bbl: u8;
     println!("Blocked blockbytes: {:?}", blocked_blockbytes);
-    if blocked_blockbytes[1] == 0 {
+    let blockbytes = if blocked_blockbytes[1] == 0 {
         bbl = 1;
-        finaldata[0][0] = false;
-        finaldata[0][1] = false;
+        [false, false]
     } else if blocked_blockbytes[2] == 0 {
         bbl = 2;
-        finaldata[0][0] = false;
-        finaldata[0][1] = true;
+        [false, true]
     } else if blocked_blockbytes[3] == 0 {
         bbl = 3;
-        finaldata[0][0] = true;
-        finaldata[0][1] = false;
+        [true, false]
     } else {
         bbl = 4;
-        finaldata[0][0] = true;
-        finaldata[0][1] = true;
+        [true, true]
     }
+    .to_vec();
+    let mut byte: usize;
+    let mut bytes = Vec::new();
     for j in 0..bbl {
         byte = j as usize;
-        finaldata.push([false; 8]);
-        for i in 0..6 {
-            finaldata[byte][7 - i] = (chunksize >> i) & 1 == 1;
-        }
-        for i in 0..6 {
-            finaldata[byte + 1][i] = (chunksize >> (6 + i)) & 1 == 1;
+        bytes.push([false; 8]);
+        for i in 0..8 {
+            bytes[byte][i] = (chunksize >> (7 - i)) & 1 == 1;
         }
     }
     let mut dictionary = Vec::<Dictionary>::new();
@@ -249,7 +241,6 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
         dictionary.sort_by_key(|x| x.value);
         tmpdictionary = Vec::new();
     }
-    // let tree = &dictionary[0].key;
     let tree = match &dictionary[0].key {
         NodeType::Tree(subtree) => subtree,
         _ => &Tree {
@@ -274,20 +265,54 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             }
         }
     }
-    let mut remainder = 2;
-    remainder = (tree_construction.len() + remainder) % 8;
-    remainder = (tree_values.len() + remainder) % 8;
-    remainder = (tree_paths.len() + remainder) % 8;
-    remainder = 8 - remainder;
-    println!("Remainder: {}", remainder);
-    finaldata
-        .iter()
+    let mut iremainder = 2;
+    iremainder = (tree_construction.len() + iremainder) % 8;
+    iremainder = (tree_values.len() + iremainder) % 8;
+    iremainder = (tree_paths.len() + iremainder) % 8;
+    iremainder = 8 - iremainder;
+    println!("Remainder: {}", iremainder);
+    let mut remainder = [false; 3];
+    if iremainder >= 4 {
+        remainder[0] = true;
+        iremainder -= 4;
+    }
+    if iremainder >= 2 {
+        remainder[1] = true;
+        iremainder -= 2;
+    }
+    if iremainder >= 1 {
+        remainder[2] = true;
+    }
+    println!("BlockBytes: {:?}", blockbytes);
+    println!("Bytes: {:?}", bytes.concat());
+    println!("Remainder: {:?}", remainder.to_vec());
+    println!("Tree Construction: {:?}", tree_construction);
+    println!("Tree Values: {:?}", tree_values);
+    println!("Tree Paths: {:?}", tree_paths);
+    let compiled_bits = [
+        blockbytes,
+        bytes.concat(),
+        remainder.to_vec(),
+        tree_construction,
+        tree_values,
+        tree_paths,
+    ]
+    .concat();
+    compiled_bits
+        .chunks(8)
+        .map(|chunk| {
+            let mut array = [false; 8];
+            for (i, &bit) in chunk.iter().enumerate() {
+                array[i] = bit;
+            }
+            array
+        })
         .map(|array| {
             array
-                .iter()
-                .fold(0, |acc, &x| (acc << 1) | (if x { 1 } else { 0 }))
+                .into_iter()
+                .fold(0u8, |acc, bit| (acc << 1) | (if bit { 1 } else { 0 }))
         })
-        .collect()
+        .collect::<Vec<u8>>()
 }
 
 fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
