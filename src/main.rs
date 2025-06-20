@@ -1,12 +1,23 @@
-use std::{env, fs::File, io::Read};
+use std::{
+    env,
+    fs::File,
+    io::{Read, Write},
+};
 
 fn main() {
     println!("On your marks...");
     let args: Vec<String> = env::args().collect();
-    let filename = match args.iter().position(|x| x == "-i" || x == "--input") {
+    let infilename = match args.iter().position(|x| x == "-i" || x == "--input") {
         Some(x) => &args[x + 1],
         None => {
-            println!("Missing filename!");
+            println!("Missing input filename!");
+            return;
+        }
+    };
+    let outfilename = match args.iter().position(|x| x == "-o" || x == "--output") {
+        Some(x) => &args[x + 1],
+        None => {
+            println!("Missing output filename!");
             return;
         }
     };
@@ -59,10 +70,17 @@ fn main() {
         }
     };
     let mut rawdata = Vec::new();
-    let _ = match File::open(filename) {
+    let _ = match File::open(infilename) {
         Ok(mut f) => f.read_to_end(&mut rawdata),
         Err(e) => {
             println!("Error opening file: {}", e);
+            return;
+        }
+    };
+    let mut file = match File::create_new(outfilename) {
+        Ok(file) => file,
+        Err(e) => {
+            println!("Error working with file: {}", e);
             return;
         }
     };
@@ -70,7 +88,8 @@ fn main() {
         true => compress_data(&rawdata, blocksize),
         false => to_workable_bytes(&decompress_data(&rawdata)),
     };
-    println!("{:?}", data);
+    let _ = file.write_all(&data);
+    let _ = file.flush();
 }
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
