@@ -70,9 +70,7 @@ fn main() {
         true => compress_data(&rawdata, blocksize),
         false => to_workable_bytes(&decompress_data(&rawdata)),
     };
-    //let usablebytes = to_workable_bytes(&data);
     println!("{:?}", data);
-    println!("Result: {}", String::from_utf8_lossy(&data));
 }
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
@@ -168,12 +166,8 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
 }
 
 fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
-    println!("Compression not yet implemented!");
-    //let mut finaldata = Vec::<[bool; 8]>::new();
-    //finaldata.push([false; 8]);
     let blocked_blockbytes = chunksize.to_le_bytes();
     let bbl: u8;
-    println!("Blocked blockbytes: {:?}", blocked_blockbytes);
     let blockbytes = if blocked_blockbytes[1] == 0 {
         bbl = 1;
         [false, false]
@@ -272,7 +266,6 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     iremainder = (tree_values.len() + iremainder) % 8;
     iremainder = (tree_paths.len() + iremainder) % 8;
     iremainder = 8 - iremainder;
-    println!("Remainder: {}", iremainder);
     let mut remainder = [false; 3];
     if iremainder >= 4 {
         remainder[0] = true;
@@ -285,12 +278,6 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     if iremainder >= 1 {
         remainder[2] = true;
     }
-    println!("BlockBytes: {:?}", blockbytes);
-    println!("Bytes: {:?}", bytes.concat());
-    println!("Remainder: {:?}", remainder.to_vec());
-    println!("Tree Construction: {:?}", tree_construction);
-    println!("Tree Values: {:?}", tree_values);
-    println!("Tree Paths: {:?}", tree_paths);
     let compiled_bits = [
         blockbytes,
         bytes.concat(),
