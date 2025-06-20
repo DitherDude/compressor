@@ -10,6 +10,7 @@ fn main() {
             return;
         }
     };
+    let mut blocksize = 0u32;
     let compression = match args
         .iter()
         .any(|x| x == "-c" || x == "--compress" || x == "--deflate")
@@ -22,6 +23,26 @@ fn main() {
                 println!("Cannot compress and decompress at the same time!");
                 return;
             } else {
+                match args.iter().position(|x| x == "-b" || x == "--blocksize") {
+                    Some(x) => match args[x + 1].parse::<u32>() {
+                        Ok(x) => {
+                            if x < 1 {
+                                println!("Block size is too small!");
+                                return;
+                            }
+                            blocksize = x;
+                            true
+                        }
+                        Err(_) => {
+                            println!("Invalid block size!");
+                            return;
+                        }
+                    },
+                    None => {
+                        println!("Missing block size!");
+                        return;
+                    }
+                };
                 true
             }
         }
@@ -46,10 +67,12 @@ fn main() {
         }
     };
     let data = match compression {
-        true => compress_data(&rawdata),
-        false => decompress_data(&rawdata),
+        true => compress_data(&rawdata, blocksize),
+        false => to_workable_bytes(&decompress_data(&rawdata)),
     };
-    println!("Result: {:?}", data);
+    //let usablebytes = to_workable_bytes(&data);
+    println!("{:?}", data);
+    println!("Result: {}", String::from_utf8_lossy(&data));
 }
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
@@ -144,31 +167,154 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
     finaldata
 }
 
-fn compress_data(data: &[u8]) -> Vec<usize> {
+fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     println!("Compression not yet implemented!");
-    let byte = 0usize;
-    let mut mode = 0u8;
-    let mut blockbytes = 6u8;
+    //let mut finaldata = Vec::<[bool; 8]>::new();
+    //finaldata.push([false; 8]);
+    let blocked_blockbytes = chunksize.to_le_bytes();
+    let bbl: u8;
+    println!("Blocked blockbytes: {:?}", blocked_blockbytes);
+    let blockbytes = if blocked_blockbytes[1] == 0 {
+        bbl = 1;
+        [false, false]
+    } else if blocked_blockbytes[2] == 0 {
+        bbl = 2;
+        [false, true]
+    } else if blocked_blockbytes[3] == 0 {
+        bbl = 3;
+        [true, false]
+    } else {
+        bbl = 4;
+        [true, true]
+    }
+    .to_vec();
+    let mut byte: usize;
+    let mut bytes = Vec::new();
+    for j in 0..bbl {
+        byte = j as usize;
+        bytes.push([false; 8]);
+        for i in 0..8 {
+            bytes[byte][i] = (chunksize >> (7 - i)) & 1 == 1;
+        }
+    }
+    let mut dictionary = Vec::<Dictionary>::new();
+    let mut block = Vec::<bool>::new();
+    let mut byte = 0usize;
     loop {
-        for bit in 0..8u8 {
+        for bit in 0..8 {
             let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
-            match mode {
-                0 => {
-                    if blockbytes == 6u8 {
-                        blockbytes = 5u8;
-                        continue;
-                    } else if blockbytes == 5u8 {
-                        let bit1 = (data[byte] >> (8 - bit)) & 1;
+            block.push(bitvalue);
+            if block.len() == chunksize as usize {
+                match dictionary
+                    .iter()
+                    .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
+                {
+                    Some(x) => dictionary[x].value += 1,
+                    None => {
+                        dictionary.push(Dictionary::newval(block, 1));
                     }
                 }
-                1 => {
-                    break;
-                }
-                _ => {}
+                block = Vec::new();
+            }
+        }
+        if data.len() > byte + 1 {
+            byte += 1;
+        } else {
+            break;
+        }
+    }
+    let mut tmpdictionary = Vec::new();
+    while dictionary.len() > 1 {
+        for chunk in dictionary.chunks(2) {
+            if chunk.len() == 2 {
+                let node1 = chunk[0].key.clone();
+                let node2 = chunk[1].key.clone();
+                let value = chunk[0].value + chunk[1].value;
+                let key = Tree {
+                    head: node1,
+                    tail: node2,
+                };
+                tmpdictionary.push(Dictionary::newtree(key, value));
+            } else {
+                tmpdictionary.push(chunk[0].clone());
+            }
+        }
+        dictionary = tmpdictionary;
+        dictionary.sort_by_key(|x| x.value);
+        tmpdictionary = Vec::new();
+    }
+    let tree = match &dictionary[0].key {
+        NodeType::Tree(subtree) => subtree,
+        _ => &Tree {
+            head: NodeType::Empty,
+            tail: NodeType::Empty,
+        },
+    };
+    let tree_construction = deconstruct_tree(tree);
+    let tree_values = concat_tree(tree);
+    let mut tree_paths: Vec<bool> = Vec::new();
+    let mut chunk = Vec::new();
+    for subbyte in data {
+        for bit in 0..8 {
+            let bitvalue = (subbyte >> (7 - bit)) & 1 == 1;
+            chunk.push(bitvalue);
+            if chunk.len() == chunksize as usize {
+                let tree_path = find_tree(tree, &chunk);
+                if let Some(x) = tree_path {
+                    tree_paths.extend(x)
+                };
+                chunk = Vec::new();
             }
         }
     }
-    Vec::new()
+    let mut iremainder = 2;
+    iremainder = (tree_construction.len() + iremainder) % 8;
+    iremainder = (tree_values.len() + iremainder) % 8;
+    iremainder = (tree_paths.len() + iremainder) % 8;
+    iremainder = 8 - iremainder;
+    println!("Remainder: {}", iremainder);
+    let mut remainder = [false; 3];
+    if iremainder >= 4 {
+        remainder[0] = true;
+        iremainder -= 4;
+    }
+    if iremainder >= 2 {
+        remainder[1] = true;
+        iremainder -= 2;
+    }
+    if iremainder >= 1 {
+        remainder[2] = true;
+    }
+    println!("BlockBytes: {:?}", blockbytes);
+    println!("Bytes: {:?}", bytes.concat());
+    println!("Remainder: {:?}", remainder.to_vec());
+    println!("Tree Construction: {:?}", tree_construction);
+    println!("Tree Values: {:?}", tree_values);
+    println!("Tree Paths: {:?}", tree_paths);
+    let compiled_bits = [
+        blockbytes,
+        bytes.concat(),
+        remainder.to_vec(),
+        tree_construction,
+        tree_values,
+        tree_paths,
+    ]
+    .concat();
+    compiled_bits
+        .chunks(8)
+        .map(|chunk| {
+            let mut array = [false; 8];
+            for (i, &bit) in chunk.iter().enumerate() {
+                array[i] = bit;
+            }
+            array
+        })
+        .map(|array| {
+            array
+                .into_iter()
+                .fold(0u8, |acc, bit| (acc << 1) | (if bit { 1 } else { 0 }))
+        })
+        .collect::<Vec<u8>>()
 }
 
 fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
@@ -198,6 +344,20 @@ fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
     true
 }
 
+fn deconstruct_tree(tree: &Tree) -> Vec<bool> {
+    let head = match &tree.head {
+        NodeType::Value(_) => vec![true],
+        NodeType::Tree(subtree) => [vec![false], deconstruct_tree(subtree)].concat(),
+        _ => Vec::new(),
+    };
+    let tail = match &tree.tail {
+        NodeType::Value(_) => vec![false],
+        NodeType::Tree(subtree) => [vec![true], deconstruct_tree(subtree)].concat(),
+        _ => Vec::new(),
+    };
+    [head, tail].concat()
+}
+
 fn fill_tree(tree: &mut Tree, data: &[bool]) -> bool {
     if !match tree.head {
         NodeType::Data => {
@@ -217,6 +377,20 @@ fn fill_tree(tree: &mut Tree, data: &[bool]) -> bool {
         return false;
     }
     true
+}
+
+fn concat_tree(tree: &Tree) -> Vec<bool> {
+    let head = match &tree.head {
+        NodeType::Value(x) => x.to_vec(),
+        NodeType::Tree(subtree) => concat_tree(subtree),
+        _ => Vec::new(),
+    };
+    let tail = match &tree.tail {
+        NodeType::Value(x) => x.to_vec(),
+        NodeType::Tree(subtree) => concat_tree(subtree),
+        _ => Vec::new(),
+    };
+    [head, tail].concat()
 }
 
 fn check_tree(tree: &Tree, node: &mut impl FnMut(&NodeType) -> bool) -> bool {
@@ -244,6 +418,37 @@ fn read_tree(tree: &Tree, path: &[bool]) -> Option<Vec<bool>> {
         NodeType::Value(x) => Some(x.to_vec()),
         _ => None,
     }
+}
+
+fn find_tree(tree: &Tree, chunk: &[bool]) -> Option<Vec<bool>> {
+    match &tree.head {
+        NodeType::Value(x) => {
+            if x == chunk {
+                Some([false].to_vec())
+            } else {
+                None
+            }
+        }
+        NodeType::Tree(subtree) => {
+            let result = find_tree(subtree, chunk);
+            result.map(|x| [vec![false], x].concat())
+        }
+        _ => None,
+    }
+    .or_else(|| match &tree.tail {
+        NodeType::Value(x) => {
+            if x == chunk {
+                Some([true].to_vec())
+            } else {
+                None
+            }
+        }
+        NodeType::Tree(subtree) => {
+            let result = find_tree(subtree, chunk);
+            result.map(|x| [vec![true], x].concat())
+        }
+        _ => None,
+    })
 }
 
 fn getval(data: &[bool]) -> usize {
@@ -295,6 +500,18 @@ impl NodeType {
     }
 }
 
+impl PartialEq for NodeType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (NodeType::Value(a), NodeType::Value(b)) => a == b,
+            (NodeType::Data, NodeType::Data) => true,
+            (NodeType::Tree(a), NodeType::Tree(b)) => a == b,
+            (NodeType::Empty, NodeType::Empty) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Tree {
     head: NodeType,
@@ -306,6 +523,33 @@ impl Tree {
         Tree {
             head: NodeType::Empty,
             tail: NodeType::Empty,
+        }
+    }
+}
+
+impl PartialEq for Tree {
+    fn eq(&self, other: &Self) -> bool {
+        self.head == other.head && self.tail == other.tail
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Dictionary {
+    key: NodeType,
+    value: usize,
+}
+
+impl Dictionary {
+    fn newval(key: Vec<bool>, value: usize) -> Dictionary {
+        Dictionary {
+            key: NodeType::Value(key),
+            value,
+        }
+    }
+    fn newtree(key: Tree, value: usize) -> Dictionary {
+        Dictionary {
+            key: NodeType::Tree(Box::new(key)),
+            value,
         }
     }
 }
