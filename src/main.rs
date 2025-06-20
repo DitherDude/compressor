@@ -46,11 +46,10 @@ fn main() {
         }
     };
     let data = match compression {
-        true => _compress_data(&rawdata),
+        true => compress_data(&rawdata),
         false => decompress_data(&rawdata),
     };
-    let usablebytes = to_workable_bytes(&data);
-    println!("Result: {}", String::from_utf8_lossy(&usablebytes));
+    println!("Result: {:?}", data);
 }
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
@@ -123,7 +122,9 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
                 4 => {
                     tmpval.push(bitvalue);
                     match read_tree(&tree, &tmpval) {
-                        Some(x) => finaldata.push(getval(&x)),
+                        Some(x) => {
+                            finaldata.push(getval(&x));
+                        }
                         _ => continue,
                     }
                     tmpval = Vec::new();
@@ -143,7 +144,7 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
     finaldata
 }
 
-fn _compress_data(data: &[u8]) -> Vec<usize> {
+fn compress_data(data: &[u8]) -> Vec<usize> {
     println!("Compression not yet implemented!");
     let byte = 0usize;
     let mut mode = 0u8;
