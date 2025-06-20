@@ -90,6 +90,7 @@ fn main() {
     };
     let _ = file.write_all(&data);
     let _ = file.flush();
+    println!("Done!");
 }
 
 fn decompress_data(data: &[u8]) -> Vec<usize> {
@@ -489,7 +490,7 @@ fn to_workable_bytes(data: &[usize]) -> Vec<u8> {
     if remaining_len > 0 {
         result.push(remaining);
     }
-    result.concat()
+    result.iter().map(|x| x[7]).collect()
 }
 
 #[derive(Debug, Clone)]
