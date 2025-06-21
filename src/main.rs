@@ -86,15 +86,31 @@ fn main() {
     };
     let data = match compression {
         true => compress_data(&rawdata, blocksize),
-        false => to_workable_bytes(&decompress_data(&rawdata)),
+        // false => to_workable_bytes(&decompress_data(&rawdata)),
+        false => decompress_data(&rawdata),
     };
+    let data = data
+        .chunks(8)
+        .map(|chunk| {
+            let mut array = [false; 8];
+            for (i, &bit) in chunk.iter().enumerate() {
+                array[i] = bit;
+            }
+            array
+        })
+        .map(|array| {
+            array
+                .into_iter()
+                .fold(0u8, |acc, bit| (acc << 1) | (if bit { 1 } else { 0 }))
+        })
+        .collect::<Vec<u8>>();
     let _ = file.write_all(&data);
     let _ = file.flush();
     println!("Done!");
 }
 
-fn decompress_data(data: &[u8]) -> Vec<usize> {
-    let mut finaldata = Vec::new();
+fn decompress_data(data: &[u8]) -> Vec<bool> {
+    let mut finaldata = Vec::<bool>::new();
     let mut blockbytes = 6u8;
     let mut blocklen = 0usize;
     let mut trimmer = 9u8;
@@ -164,7 +180,8 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
                     tmpval.push(bitvalue);
                     match read_tree(&tree, &tmpval) {
                         Some(x) => {
-                            finaldata.push(getval(&x));
+                            //finaldata.push(getval(&x));
+                            finaldata.extend_from_slice(&x);
                         }
                         _ => continue,
                     }
@@ -185,7 +202,7 @@ fn decompress_data(data: &[u8]) -> Vec<usize> {
     finaldata
 }
 
-fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
+fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
     print!("Reading metadata...");
     let blocked_blockbytes = chunksize.to_le_bytes();
     let bbl: u8;
@@ -240,7 +257,7 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             break;
         }
     }
-    print!("\rnConstructing lookup table... (1/2)");
+    print!("\rnConstructing lookup table... (1/2) ");
     let _ = std::io::stdout().flush();
     let mut tmpdictionary = Vec::new();
     while dictionary.len() > 1 {
@@ -269,7 +286,7 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             tail: NodeType::Empty,
         },
     };
-    print!("\rConstructing lookup table... (2/2)\nWalking paths...");
+    print!("\rConstructing lookup table... (2/2) \nWalking paths...");
     let _ = std::io::stdout().flush();
     let tree_construction = deconstruct_tree(tree);
     let tree_values = concat_tree(tree);
@@ -288,7 +305,6 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
             }
         }
     }
-    println!("\rWalking paths... Done!\nCompiling results...");
     let mut iremainder = 2;
     iremainder = (tree_construction.len() + iremainder) % 8;
     iremainder = (tree_values.len() + iremainder) % 8;
@@ -306,30 +322,16 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<u8> {
     if iremainder >= 1 {
         remainder[2] = true;
     }
-    let compiled_bits = [
+    let bytes = bytes.concat();
+    [
         blockbytes,
-        bytes.concat(),
+        bytes,
         remainder.to_vec(),
         tree_construction,
         tree_values,
         tree_paths,
     ]
-    .concat();
-    compiled_bits
-        .chunks(8)
-        .map(|chunk| {
-            let mut array = [false; 8];
-            for (i, &bit) in chunk.iter().enumerate() {
-                array[i] = bit;
-            }
-            array
-        })
-        .map(|array| {
-            array
-                .into_iter()
-                .fold(0u8, |acc, bit| (acc << 1) | (if bit { 1 } else { 0 }))
-        })
-        .collect::<Vec<u8>>()
+    .concat()
 }
 
 fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
@@ -464,41 +466,6 @@ fn find_tree(tree: &Tree, chunk: &[bool]) -> Option<Vec<bool>> {
         }
         _ => None,
     })
-}
-
-fn getval(data: &[bool]) -> usize {
-    data.iter()
-        .fold(0, |acc, &x| (acc << 1) | (if x { 1usize } else { 0usize }))
-}
-
-fn to_workable_bytes(data: &[usize]) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut remaining = [0; 8];
-    let mut remaining_len = 0;
-
-    for num in data {
-        let num_bytes = num.to_be_bytes();
-        if remaining_len > 0 {
-            let mut combined = [0; 8];
-            combined[..remaining_len].copy_from_slice(&remaining);
-            combined[remaining_len..].copy_from_slice(&num_bytes[..8 - remaining_len]);
-            result.push(combined);
-            remaining_len = 0;
-            remaining = [0; 8];
-        }
-        for chunk in num_bytes.chunks(8) {
-            if chunk.len() == 8 {
-                result.push(chunk.try_into().unwrap());
-            } else {
-                remaining.copy_from_slice(chunk);
-                remaining_len = chunk.len();
-            }
-        }
-    }
-    if remaining_len > 0 {
-        result.push(remaining);
-    }
-    result.iter().map(|x| x[7]).collect()
 }
 
 #[derive(Debug, Clone)]
