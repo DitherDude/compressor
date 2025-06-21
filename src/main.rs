@@ -140,13 +140,17 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
                     } else if blockbytes == 5u8 {
                         let bit1 = (data[byte] >> (8 - bit)) & 1;
                         blockbytes = ((bit1) << 1 | (bitvalue as u8)) + 1;
-                        let mut result = vec![0u8; 4];
-                        for i in 0..blockbytes {
-                            let microdata = u16::from_le_bytes([data[byte], data[byte + 1]]);
-                            result[i as usize] = (microdata << (bit + 1)).to_le_bytes()[0];
+                        let mut result = Vec::new();
+                        for _ in 0..blockbytes {
+                            for j in 2..8 {
+                                result.push((data[byte] >> (7 - j)) & 1 == 1);
+                            }
+                            for j in 0..2 {
+                                result.push((data[byte + 1] >> (7 - j)) & 1 == 1);
+                            }
                             byte += 1;
                         }
-                        blocklen = u32::from_le_bytes(result.try_into().unwrap()) as usize;
+                        blocklen = result.iter().fold(0, |acc, &x| acc * 2 + x as usize);
                         mode = 1;
                         continue;
                     }
