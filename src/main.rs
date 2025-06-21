@@ -97,7 +97,6 @@ fn main() {
     };
     let data = match compression {
         true => compress_data(&rawdata, blocksize),
-        // false => to_workable_bytes(&decompress_data(&rawdata)),
         false => decompress_data(&rawdata),
     };
     let data = data
@@ -185,6 +184,7 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
                         if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
                             print!("\rPopulating tree... Done!\n");
                             mode = 4;
+                            continue;
                         }
                     }
                 }
@@ -193,10 +193,10 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
                     match read_tree(&tree, &tmpval) {
                         Some(x) => {
                             finaldata.extend_from_slice(&x);
+                            tmpval = Vec::new();
                         }
                         _ => continue,
                     }
-                    tmpval = Vec::new();
                 }
                 _ => {}
             }
@@ -316,25 +316,12 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
             }
         }
     }
-    // let mut iremainder = 2;
-    let mut iremainder = 2 + (tree_construction.len() + tree_values.len() + tree_paths.len()) % 8;
-    let mut remainder = [false; 3];
-    if iremainder >= 4 {
-        remainder[0] = true;
-        iremainder -= 4;
-    }
-    if iremainder >= 2 {
-        remainder[1] = true;
-        iremainder -= 2;
-    }
-    if iremainder >= 1 {
-        remainder[2] = true;
-    }
+    let mut remainder = 0;
     let bytes = bytes.concat();
     let mut finaldata = [
         blockbytes,
         bytes,
-        remainder.to_vec(),
+        [false; 3].to_vec(),
         tree_construction,
         tree_values,
         tree_paths,
@@ -342,6 +329,19 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
     .concat();
     while (finaldata.len() % 8) != 0 {
         finaldata.push(false);
+        remainder += 1;
+    }
+    let index = 2usize + (bbl as usize * 8);
+    if remainder >= 4 {
+        finaldata[index] = true;
+        remainder -= 4;
+    }
+    if remainder >= 2 {
+        finaldata[index + 1] = true;
+        remainder -= 2;
+    }
+    if remainder >= 1 {
+        finaldata[index + 2] = true;
     }
     finaldata
 }
