@@ -21,6 +21,7 @@ fn main() {
             return;
         }
     };
+    let force = args.iter().any(|x| x == "-f" || x == "--force");
     let mut blocksize = 0u32;
     let compression = match args
         .iter()
@@ -77,11 +78,21 @@ fn main() {
             return;
         }
     };
-    let mut file = match File::create_new(outfilename) {
-        Ok(file) => file,
-        Err(e) => {
-            println!("Error working with file: {}", e);
-            return;
+    let mut file = if force {
+        match File::create(outfilename) {
+            Ok(file) => file,
+            Err(e) => {
+                println!("Error working with file: {}", e);
+                return;
+            }
+        }
+    } else {
+        match File::create_new(outfilename) {
+            Ok(file) => file,
+            Err(e) => {
+                println!("Error working with file: {}", e);
+                return;
+            }
         }
     };
     let data = match compression {
@@ -147,8 +158,9 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
                         continue;
                     } else if trimmer == 8u8 {
                         let bit1 = (data[byte] >> (8 - bit)) & 1;
+                        let bit2 = (data[byte] >> (7 - bit)) & 1;
                         let bit3 = (data[byte] >> (6 - bit)) & 1;
-                        trimmer = (bit1) << 2 | (bitvalue as u8) << 1 | (bit3);
+                        trimmer = (bit1) << 2 | (bit2) << 1 | (bit3);
                         continue;
                     } else {
                         print!("Constructing tree...");
@@ -180,7 +192,6 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
                     tmpval.push(bitvalue);
                     match read_tree(&tree, &tmpval) {
                         Some(x) => {
-                            //finaldata.push(getval(&x));
                             finaldata.extend_from_slice(&x);
                         }
                         _ => continue,
@@ -305,11 +316,8 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
             }
         }
     }
-    let mut iremainder = 2;
-    iremainder = (tree_construction.len() + iremainder) % 8;
-    iremainder = (tree_values.len() + iremainder) % 8;
-    iremainder = (tree_paths.len() + iremainder) % 8;
-    iremainder = 8 - iremainder;
+    // let mut iremainder = 2;
+    let mut iremainder = 2 + (tree_construction.len() + tree_values.len() + tree_paths.len()) % 8;
     let mut remainder = [false; 3];
     if iremainder >= 4 {
         remainder[0] = true;
@@ -323,7 +331,7 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
         remainder[2] = true;
     }
     let bytes = bytes.concat();
-    [
+    let mut finaldata = [
         blockbytes,
         bytes,
         remainder.to_vec(),
@@ -331,7 +339,11 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
         tree_values,
         tree_paths,
     ]
-    .concat()
+    .concat();
+    while (finaldata.len() % 8) != 0 {
+        finaldata.push(false);
+    }
+    finaldata
 }
 
 fn construct_tree(tree: &mut Tree, bit: bool) -> bool {
