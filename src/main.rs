@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env,
     fs::{File, remove_file},
     io::{Read, Write},
@@ -121,6 +122,7 @@ fn main() {
 }
 
 fn decompress_data(data: &[u8]) -> Vec<bool> {
+    print!("Reading metadata...");
     let mut finaldata = Vec::<bool>::new();
     let mut datab: Vec<bool> = data
         .iter()
@@ -138,8 +140,9 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
     let trimmer =
         ((datab[cursor] as u8) << 2) | ((datab[cursor + 1] as u8) << 1) | datab[cursor + 2] as u8;
     datab.drain(datab.len() - trimmer as usize..);
+    let datablen = datab.len();
     cursor += 3;
-    print!("Constructing tree...");
+    print!("\rReading metadata... Done!\nConstructing tree...");
     let _ = std::io::stdout().flush();
     let mut tree = Tree::new();
     while !check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
@@ -159,7 +162,7 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
     }
     print!("\rPopulating tree... Done!\n");
     let _ = std::io::stdout().flush();
-    while cursor < datab.len() {
+    while cursor < datablen {
         tmpval.push(datab[cursor]);
         cursor += 1;
         if let Some(x) = read_tree(&tree, &tmpval) {
@@ -171,7 +174,7 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
 }
 
 fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
-    print!("Reading metadata...");
+    print!("Configuring metadata...");
     let _ = std::io::stdout().flush();
     let blocked_blockbytes = chunksize.to_le_bytes();
     let bbl: u8;
@@ -193,6 +196,7 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
         .iter()
         .flat_map(|&byte| (0..8).rev().map(move |bit| (byte & (1 << bit)) != 0))
         .collect();
+    let datablen = datab.len();
     let mut cursor = 0;
     let mut bytes = Vec::new();
     for _ in 0..bbl {
@@ -202,26 +206,23 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
                 .collect::<Vec<bool>>(),
         );
     }
-    print!("\rReading metadata... Done!\nConstructing lookup table...");
+    print!("\rConfiguring metadata... Done!\nConstructing lookup table...");
     let _ = std::io::stdout().flush();
-    let mut dictionary = Vec::<Dictionary>::new();
+    let mut dictionary = HashMap::<NodeType, usize>::new();
     let mut block;
-    while cursor < datab.len() {
-        if cursor + chunksize > datab.len() {
-            let spillover = (cursor + chunksize) - datab.len();
+    while cursor < datablen {
+        print!(
+            "\rConstructing lookup table... {}%",
+            cursor * 100 / datablen
+        );
+        let _ = std::io::stdout().flush();
+        if cursor + chunksize > datablen {
+            let spillover = (cursor + chunksize) - datablen;
             if zerofill {
                 println!("\rPerforming zero fill. Expect volatile behaviour.");
                 let _ = std::io::stdout().flush();
                 block = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
-                match dictionary
-                    .iter()
-                    .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
-                {
-                    Some(x) => dictionary[x].value += 1,
-                    None => {
-                        dictionary.push(Dictionary::newval(block, 1));
-                    }
-                }
+                *dictionary.entry(NodeType::Value(block)).or_insert(0) += 1;
             } else {
                 println!(
                     "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen!",
@@ -233,40 +234,35 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
             break;
         }
         block = datab[cursor..cursor + chunksize].to_vec();
-        match dictionary
-            .iter()
-            .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
-        {
-            Some(x) => dictionary[x].value += 1,
-            None => {
-                dictionary.push(Dictionary::newval(block, 1));
-            }
-        }
+        *dictionary.entry(NodeType::Value(block)).or_insert(0) += 1;
         cursor += chunksize;
     }
     print!("\rConstructing lookup table... Done!\nSorting lookup table...");
     let _ = std::io::stdout().flush();
-    let mut tmpdictionary = Vec::new();
+    let mut dictionary: Vec<(NodeType, usize)> =
+        dictionary.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    dictionary.sort_by_key(|x| x.1);
+    let mut tmpdictionary: Vec<(NodeType, usize)> = Vec::new();
     while dictionary.len() > 1 {
         for chunk in dictionary.chunks(2) {
             if chunk.len() == 2 {
-                let node1 = chunk[0].key.clone();
-                let node2 = chunk[1].key.clone();
-                let value = chunk[0].value + chunk[1].value;
+                let node1 = chunk[0].0.clone();
+                let node2 = chunk[1].0.clone();
+                let value = chunk[0].1 + chunk[1].1;
                 let key = Tree {
                     head: node1,
                     tail: node2,
                 };
-                tmpdictionary.push(Dictionary::newtree(key, value));
+                tmpdictionary.push((NodeType::Tree(Box::new(key)), value));
             } else {
-                tmpdictionary.push(chunk[0].clone());
+                tmpdictionary.push((chunk[0].0.clone(), chunk[0].1));
             }
         }
         dictionary = tmpdictionary;
-        dictionary.sort_by_key(|x| x.value);
+        dictionary.sort_by_key(|x| x.1);
         tmpdictionary = Vec::new();
     }
-    let tree = match &dictionary[0].key {
+    let tree = match &dictionary[0].0 {
         NodeType::Tree(subtree) => subtree,
         _ => &Tree {
             head: NodeType::Empty,
@@ -277,26 +273,39 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
     let _ = std::io::stdout().flush();
     let tree_construction = deconstruct_tree(tree);
     let tree_values = concat_tree(tree);
+    let tree_lookup = lookup_tree(tree, &[]);
     let mut tree_paths: Vec<bool> = Vec::new();
     let mut chunk;
     cursor = 0;
-    while cursor < datab.len() {
-        if cursor + chunksize > datab.len() {
-            let spillover = (cursor + chunksize) - datab.len();
+    while cursor < datablen {
+        print!("\rWalking paths... {}%", cursor * 100 / datablen);
+        let _ = std::io::stdout().flush();
+        if cursor + chunksize > datablen {
+            let spillover = (cursor + chunksize) - datablen;
             if zerofill {
                 chunk = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
-                if let Some(x) = find_tree(tree, &chunk) {
-                    tree_paths.extend(x);
+                // if let Some(x) = _find_tree(tree, &chunk) {
+                //     println!("\rPath: {:?}", x);
+                //     tree_paths.extend(x);
+                // }
+                if let Some(x) = tree_lookup.get(&chunk) {
+                    tree_paths.extend(x.to_vec());
                 }
             }
             break;
         }
         chunk = datab[cursor..cursor + chunksize].to_vec();
-        if let Some(x) = find_tree(tree, &chunk) {
-            tree_paths.extend(x);
+        // if let Some(x) = _find_tree(tree, &chunk) {
+        //     println!("\rPath: {:?}", x);
+        //     tree_paths.extend(x);
+        // }
+        if let Some(x) = tree_lookup.get(&chunk) {
+            tree_paths.extend(x.to_vec());
         }
         cursor += chunksize;
     }
+    println!("\rWalking paths... Done!");
+    let _ = std::io::stdout().flush();
     let mut remainder = 0;
     let mut finaldata = [
         blockbytes,
@@ -429,7 +438,7 @@ fn read_tree(tree: &Tree, path: &[bool]) -> Option<Vec<bool>> {
     }
 }
 
-fn find_tree(tree: &Tree, chunk: &[bool]) -> Option<Vec<bool>> {
+fn _find_tree(tree: &Tree, chunk: &[bool]) -> Option<Vec<bool>> {
     match &tree.head {
         NodeType::Value(x) => {
             if x == chunk {
@@ -439,7 +448,7 @@ fn find_tree(tree: &Tree, chunk: &[bool]) -> Option<Vec<bool>> {
             }
         }
         NodeType::Tree(subtree) => {
-            let result = find_tree(subtree, chunk);
+            let result = _find_tree(subtree, chunk);
             result.map(|x| [vec![false], x].concat())
         }
         _ => None,
@@ -453,14 +462,31 @@ fn find_tree(tree: &Tree, chunk: &[bool]) -> Option<Vec<bool>> {
             }
         }
         NodeType::Tree(subtree) => {
-            let result = find_tree(subtree, chunk);
+            let result = _find_tree(subtree, chunk);
             result.map(|x| [vec![true], x].concat())
         }
         _ => None,
     })
 }
 
-#[derive(Debug, Clone)]
+fn lookup_tree(tree: &Tree, path: &[bool]) -> HashMap<Vec<bool>, Vec<bool>> {
+    let mut result = HashMap::new();
+    let subpath = [path, &[false]].concat();
+    if let NodeType::Value(x) = &tree.head {
+        result.insert(x.to_vec(), subpath);
+    } else if let NodeType::Tree(subtree) = &tree.head {
+        result.extend(lookup_tree(subtree, &subpath));
+    }
+    let subpath = [path, &[true]].concat();
+    if let NodeType::Value(x) = &tree.tail {
+        result.insert(x.to_vec(), subpath);
+    } else if let NodeType::Tree(subtree) = &tree.tail {
+        result.extend(lookup_tree(subtree, &subpath));
+    }
+    result
+}
+
+#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 enum NodeType {
     Value(Vec<bool>),
     Data,
@@ -474,19 +500,7 @@ impl NodeType {
     }
 }
 
-impl PartialEq for NodeType {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (NodeType::Value(a), NodeType::Value(b)) => a == b,
-            (NodeType::Data, NodeType::Data) => true,
-            (NodeType::Tree(a), NodeType::Tree(b)) => a == b,
-            (NodeType::Empty, NodeType::Empty) => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 struct Tree {
     head: NodeType,
     tail: NodeType,
@@ -497,33 +511,6 @@ impl Tree {
         Tree {
             head: NodeType::Empty,
             tail: NodeType::Empty,
-        }
-    }
-}
-
-impl PartialEq for Tree {
-    fn eq(&self, other: &Self) -> bool {
-        self.head == other.head && self.tail == other.tail
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Dictionary {
-    key: NodeType,
-    value: usize,
-}
-
-impl Dictionary {
-    fn newval(key: Vec<bool>, value: usize) -> Dictionary {
-        Dictionary {
-            key: NodeType::Value(key),
-            value,
-        }
-    }
-    fn newtree(key: Tree, value: usize) -> Dictionary {
-        Dictionary {
-            key: NodeType::Tree(Box::new(key)),
-            value,
         }
     }
 }
