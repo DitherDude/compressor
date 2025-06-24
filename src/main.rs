@@ -82,10 +82,14 @@ fn main() {
             }
         }
     };
-    let data = match compression {
+    let mut data = match compression {
         true => compress_data(&rawdata, blocksize, zero),
         false => decompress_data(&rawdata),
     };
+    while data.len() % 8 != 0 {
+        println!("Pop!");
+        data.pop();
+    }
     let data = data
         .chunks(8)
         .map(|chunk| {
@@ -271,6 +275,7 @@ fn compress_data(data: &[u8], chunksize: u32, zerofill: bool) -> Vec<bool> {
     }
     if block != Vec::new() {
         if zerofill {
+            println!("\rPerforming zero fill. Expect volatile behaviour.");
             loop {
                 block.push(false);
                 if block.len() == chunksize as usize {
@@ -340,6 +345,18 @@ fn compress_data(data: &[u8], chunksize: u32, zerofill: bool) -> Vec<bool> {
                     tree_paths.extend(x)
                 };
                 chunk = Vec::new();
+            }
+        }
+    }
+    if chunk != Vec::new() && zerofill {
+        loop {
+            chunk.push(false);
+            if chunk.len() == chunksize as usize {
+                let tree_path = find_tree(tree, &chunk);
+                if let Some(x) = tree_path {
+                    tree_paths.extend(x)
+                };
+                break;
             }
         }
     }
