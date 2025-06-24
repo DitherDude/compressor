@@ -12,15 +12,17 @@ fn main() {
     let mut outfilename = "";
     let mut blocksize = 0u32;
     let mut compression = false;
+    let mut zero = false;
     for (i, arg) in args.iter().enumerate() {
         if arg.starts_with("--") {
             match arg.strip_prefix("--").unwrap_or_default() {
+                "blocksize" => blocksize = args[i + 1].parse().unwrap_or(0u32),
+                "compress" | "deflate" => compression = true,
+                "decompress" | "inflate" => compression = false,
                 "force" => force = true,
                 "input" => infilename = &args[i + 1],
                 "output" => outfilename = &args[i + 1],
-                "compress" | "deflate" => compression = true,
-                "decompress" | "inflate" => compression = false,
-                "blocksize" => blocksize = args[i + 1].parse().unwrap_or(0u32),
+                "zero" => zero = true,
                 _ => {
                     println!("Expected long-name parameter.")
                 }
@@ -29,6 +31,12 @@ fn main() {
             let mut index = 1;
             for char in arg.strip_prefix("-").unwrap_or_default().chars() {
                 match char {
+                    'b' => {
+                        blocksize = args[i + index].parse().unwrap_or(0u32);
+                        index += 1;
+                    }
+                    'c' => compression = true,
+                    'd' => compression = false,
                     'f' => {
                         force = true;
                     }
@@ -40,12 +48,7 @@ fn main() {
                         outfilename = &args[i + index];
                         index += 1;
                     }
-                    'c' => compression = true,
-                    'd' => compression = false,
-                    'b' => {
-                        blocksize = args[i + index].parse().unwrap_or(0u32);
-                        index += 1;
-                    }
+                    'z' => zero = true,
                     _ => {
                         println!("Expected short-name parameter or collection of.");
                         return;
@@ -80,7 +83,7 @@ fn main() {
         }
     };
     let data = match compression {
-        true => compress_data(&rawdata, blocksize),
+        true => compress_data(&rawdata, blocksize, zero),
         false => decompress_data(&rawdata),
     };
     let data = data
@@ -211,7 +214,7 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
     finaldata
 }
 
-fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
+fn compress_data(data: &[u8], chunksize: u32, zerofill: bool) -> Vec<bool> {
     print!("Reading metadata...");
     let blocked_blockbytes = chunksize.to_le_bytes();
     let bbl: u8;
@@ -267,12 +270,30 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
         }
     }
     if block != Vec::new() {
-        println!(
-            "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen!",
-            block.len(),
-            chunksize - block.len() as u32
-        );
-        return Vec::new();
+        if zerofill {
+            loop {
+                block.push(false);
+                if block.len() == chunksize as usize {
+                    match dictionary
+                        .iter()
+                        .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
+                    {
+                        Some(x) => dictionary[x].value += 1,
+                        None => {
+                            dictionary.push(Dictionary::newval(block, 1));
+                        }
+                    }
+                    break;
+                }
+            }
+        } else {
+            println!(
+                "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen!",
+                block.len(),
+                chunksize - block.len() as u32
+            );
+            return Vec::new();
+        }
     }
     print!("\rnConstructing lookup table... (1/2) ");
     let _ = std::io::stdout().flush();
