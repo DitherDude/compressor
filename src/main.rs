@@ -272,6 +272,14 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
             break;
         }
     }
+    if block != Vec::new() {
+        println!(
+            "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen.!",
+            block.len(),
+            chunksize - block.len() as u32
+        );
+        return Vec::new();
+    }
     print!("\rnConstructing lookup table... (1/2) ");
     let _ = std::io::stdout().flush();
     let mut tmpdictionary = Vec::new();
