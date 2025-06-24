@@ -83,7 +83,7 @@ fn main() {
         }
     };
     let mut data = match compression {
-        true => compress_data(&rawdata, blocksize, zero),
+        true => compress_data(&rawdata, blocksize as usize, zero),
         false => decompress_data(&rawdata),
     };
     while data.len() % 8 != 0 {
@@ -167,7 +167,7 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
     finaldata
 }
 
-fn compress_data(data: &[u8], chunksize: u32, zerofill: bool) -> Vec<bool> {
+fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
     print!("Reading metadata...");
     let blocked_blockbytes = chunksize.to_le_bytes();
     let bbl: u8;
@@ -185,25 +185,28 @@ fn compress_data(data: &[u8], chunksize: u32, zerofill: bool) -> Vec<bool> {
         [true, true]
     }
     .to_vec();
-    let mut byte: usize;
+    let datab: Vec<bool> = data
+        .iter()
+        .flat_map(|&byte| (0..8).rev().map(move |bit| (byte & (1 << bit)) != 0))
+        .collect();
+    let mut cursor = 0;
     let mut bytes = Vec::new();
-    for j in 0..bbl {
-        byte = j as usize;
-        bytes.push([false; 8]);
-        for i in 0..8 {
-            bytes[byte][i] = (chunksize >> (7 - i)) & 1 == 1;
-        }
+    for _ in 0..bbl {
+        bytes.extend(
+            (0..8)
+                .map(|i| (chunksize >> (7 - i)) & 1 == 1)
+                .collect::<Vec<bool>>(),
+        );
     }
+    print!("\rReading metadata... Done!\nConstructing lookup table...");
     let mut dictionary = Vec::<Dictionary>::new();
-    let mut block = Vec::<bool>::new();
-    let mut byte = 0usize;
-    print!("\rReading metadata... Done!\nConstructing lookup table... (0/2)");
-    let _ = std::io::stdout().flush();
-    loop {
-        for bit in 0..8 {
-            let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
-            block.push(bitvalue);
-            if block.len() == chunksize as usize {
+    let mut block;
+    while cursor < datab.len() {
+        if cursor + chunksize > datab.len() {
+            let spillover = (cursor + chunksize) - datab.len();
+            if zerofill {
+                println!("\rPerforming zero fill. Expect volatile behaviour.");
+                block = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
                 match dictionary
                     .iter()
                     .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
@@ -213,43 +216,29 @@ fn compress_data(data: &[u8], chunksize: u32, zerofill: bool) -> Vec<bool> {
                         dictionary.push(Dictionary::newval(block, 1));
                     }
                 }
-                block = Vec::new();
+            } else {
+                println!(
+                    "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen!",
+                    spillover,
+                    chunksize - spillover
+                );
+                return Vec::new();
             }
-        }
-        if data.len() > byte + 1 {
-            byte += 1;
-        } else {
             break;
         }
-    }
-    if block != Vec::new() {
-        if zerofill {
-            println!("\rPerforming zero fill. Expect volatile behaviour.");
-            loop {
-                block.push(false);
-                if block.len() == chunksize as usize {
-                    match dictionary
-                        .iter()
-                        .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
-                    {
-                        Some(x) => dictionary[x].value += 1,
-                        None => {
-                            dictionary.push(Dictionary::newval(block, 1));
-                        }
-                    }
-                    break;
-                }
+        block = datab[cursor..cursor + chunksize].to_vec();
+        match dictionary
+            .iter()
+            .position(|x| matches!(&x.key, NodeType::Value(v) if *v == block))
+        {
+            Some(x) => dictionary[x].value += 1,
+            None => {
+                dictionary.push(Dictionary::newval(block, 1));
             }
-        } else {
-            println!(
-                "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen!",
-                block.len(),
-                chunksize - block.len() as u32
-            );
-            return Vec::new();
         }
+        cursor += chunksize;
     }
-    print!("\rnConstructing lookup table... (1/2) ");
+    print!("\rConstructing lookup table... Done!\nSorting lookup table...");
     let _ = std::io::stdout().flush();
     let mut tmpdictionary = Vec::new();
     while dictionary.len() > 1 {
@@ -278,39 +267,31 @@ fn compress_data(data: &[u8], chunksize: u32, zerofill: bool) -> Vec<bool> {
             tail: NodeType::Empty,
         },
     };
-    print!("\rConstructing lookup table... (2/2) \nWalking paths...");
+    print!("\rSorting lookup table... Done!\nWalking paths...");
     let _ = std::io::stdout().flush();
     let tree_construction = deconstruct_tree(tree);
     let tree_values = concat_tree(tree);
     let mut tree_paths: Vec<bool> = Vec::new();
-    let mut chunk = Vec::new();
-    for subbyte in data {
-        for bit in 0..8 {
-            let bitvalue = (subbyte >> (7 - bit)) & 1 == 1;
-            chunk.push(bitvalue);
-            if chunk.len() == chunksize as usize {
-                let tree_path = find_tree(tree, &chunk);
-                if let Some(x) = tree_path {
-                    tree_paths.extend(x)
-                };
-                chunk = Vec::new();
+    let mut chunk;
+    cursor = 0;
+    while cursor < datab.len() {
+        if cursor + chunksize > datab.len() {
+            let spillover = (cursor + chunksize) - datab.len();
+            if zerofill {
+                chunk = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
+                if let Some(x) = find_tree(tree, &chunk) {
+                    tree_paths.extend(x);
+                }
             }
+            break;
         }
-    }
-    if chunk != Vec::new() && zerofill {
-        loop {
-            chunk.push(false);
-            if chunk.len() == chunksize as usize {
-                let tree_path = find_tree(tree, &chunk);
-                if let Some(x) = tree_path {
-                    tree_paths.extend(x)
-                };
-                break;
-            }
+        chunk = datab[cursor..cursor + chunksize].to_vec();
+        if let Some(x) = find_tree(tree, &chunk) {
+            tree_paths.extend(x);
         }
+        cursor += chunksize;
     }
     let mut remainder = 0;
-    let bytes = bytes.concat();
     let mut finaldata = [
         blockbytes,
         bytes,
