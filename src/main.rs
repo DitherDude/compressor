@@ -13,6 +13,7 @@ fn main() {
     let mut outfilename = "";
     let mut blocksize = 0u32;
     let mut compression = false;
+    let mut hashing = false;
     let mut zero = false;
     for (i, arg) in args.iter().enumerate() {
         if arg.starts_with("--") {
@@ -23,6 +24,7 @@ fn main() {
                 "force" => force = true,
                 "input" => infilename = &args[i + 1],
                 "output" => outfilename = &args[i + 1],
+                "use-hashmap" => hashing = true,
                 "zero" => zero = true,
                 _ => {
                     println!("Expected long-name parameter.")
@@ -49,6 +51,7 @@ fn main() {
                         outfilename = &args[i + index];
                         index += 1;
                     }
+                    'x' => hashing = true,
                     'z' => zero = true,
                     _ => {
                         println!("Expected short-name parameter or collection of.");
@@ -84,8 +87,8 @@ fn main() {
         }
     };
     let mut data = match compression {
-        true => compress_data(&rawdata, blocksize as usize, zero),
-        false => decompress_data(&rawdata),
+        true => compress_data(&rawdata, blocksize as usize, zero, hashing),
+        false => decompress_data(&rawdata, hashing),
     };
     while data.len() % 8 != 0 {
         println!("Pop!");
@@ -107,9 +110,11 @@ fn main() {
         })
         .collect::<Vec<u8>>();
     if !data.is_empty() {
+        print!("Writing data...");
+        let _ = std::io::stdout().flush();
         let _ = file.write_all(&data);
         let _ = file.flush();
-        println!("Done!");
+        println!("\rWriting data... Done!");
     } else {
         match remove_file(outfilename) {
             Ok(_) => println!("Program failed! file {} was removed.", outfilename),
@@ -121,7 +126,7 @@ fn main() {
     }
 }
 
-fn decompress_data(data: &[u8]) -> Vec<bool> {
+fn decompress_data(data: &[u8], hashing: bool) -> Vec<bool> {
     print!("Reading metadata...");
     let mut finaldata = Vec::<bool>::new();
     let mut datab: Vec<bool> = data
@@ -154,26 +159,54 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
     let mut tmpval = Vec::new();
     while !check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
         while tmpval.len() < blocklen {
+            if cursor == datablen {
+                break;
+            }
             tmpval.push(datab[cursor]);
             cursor += 1;
         }
         fill_tree(&mut tree, &tmpval);
         tmpval = Vec::new();
     }
-    print!("\rPopulating tree... Done!\n");
-    let _ = std::io::stdout().flush();
-    while cursor < datablen {
-        tmpval.push(datab[cursor]);
-        cursor += 1;
-        if let Some(x) = read_tree(&tree, &tmpval) {
-            finaldata.extend_from_slice(&x);
-            tmpval = Vec::new();
+    tmpval = Vec::new();
+    if hashing {
+        print!("\rPopulating tree... Done!\nGenerating lookup table...");
+        let _ = std::io::stdout().flush();
+        let tree_lookup = lookup_tree(&tree, &[], false);
+        print!("\rGenerating lookup table... Done!\nQuerying lookup table...");
+        let _ = std::io::stdout().flush();
+        while cursor < datablen {
+            print!("\rQuerying lookup table... {}%", cursor * 100 / datablen);
+            let _ = std::io::stdout().flush();
+            tmpval.push(datab[cursor]);
+            if let Some(x) = tree_lookup.get(&tmpval) {
+                finaldata.extend_from_slice(x);
+                tmpval = Vec::new();
+            }
+            cursor += 1;
         }
+        println!("\rQuerying lookup table... Done!");
+        let _ = std::io::stdout().flush();
+    } else {
+        print!("\rPopulating tree... Done!\nWalking paths...");
+        let _ = std::io::stdout().flush();
+        while cursor < datablen {
+            print!("\rWalking paths... {}%", cursor * 100 / datablen);
+            let _ = std::io::stdout().flush();
+            tmpval.push(datab[cursor]);
+            if let Some(x) = read_tree(&tree, &tmpval) {
+                finaldata.extend_from_slice(&x);
+                tmpval = Vec::new();
+            }
+            cursor += 1;
+        }
+        println!("\rWalking paths... Done!");
     }
+    let _ = std::io::stdout().flush();
     finaldata
 }
 
-fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
+fn compress_data(data: &[u8], chunksize: usize, zerofill: bool, hashing: bool) -> Vec<bool> {
     print!("Configuring metadata...");
     let _ = std::io::stdout().flush();
     let blocked_blockbytes = chunksize.to_le_bytes();
@@ -269,42 +302,64 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
             tail: NodeType::Empty,
         },
     };
-    print!("\rSorting lookup table... Done!\nWalking paths...");
-    let _ = std::io::stdout().flush();
-    let tree_construction = deconstruct_tree(tree);
-    let tree_values = concat_tree(tree);
-    let tree_lookup = lookup_tree(tree, &[]);
     let mut tree_paths: Vec<bool> = Vec::new();
     let mut chunk;
     cursor = 0;
-    while cursor < datablen {
-        print!("\rWalking paths... {}%", cursor * 100 / datablen);
+    if hashing {
+        print!("\rSorting lookup table... Done!\nGenerating lookup table...");
         let _ = std::io::stdout().flush();
-        if cursor + chunksize > datablen {
-            let spillover = (cursor + chunksize) - datablen;
-            if zerofill {
-                chunk = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
-                // if let Some(x) = _find_tree(tree, &chunk) {
-                //     println!("\rPath: {:?}", x);
-                //     tree_paths.extend(x);
-                // }
-                if let Some(x) = tree_lookup.get(&chunk) {
-                    tree_paths.extend(x.to_vec());
+        let tree_lookup = lookup_tree(tree, &[], true);
+        print!("\rGenerating lookup table... Done!\nQuerying lookup table...");
+        let _ = std::io::stdout().flush();
+        while cursor < datablen {
+            print!("\rQuerying lookup table... {}%", cursor * 100 / datablen);
+            let _ = std::io::stdout().flush();
+            if cursor + chunksize > datablen {
+                let spillover = (cursor + chunksize) - datablen;
+                if zerofill {
+                    chunk = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
+                    if let Some(x) = tree_lookup.get(&chunk) {
+                        println!("{:?}", x);
+                        tree_paths.extend(x.to_vec());
+                    }
                 }
+                break;
             }
-            break;
+            chunk = datab[cursor..cursor + chunksize].to_vec();
+            if let Some(x) = tree_lookup.get(&chunk) {
+                tree_paths.extend(x.to_vec());
+            }
+            cursor += chunksize;
         }
-        chunk = datab[cursor..cursor + chunksize].to_vec();
-        // if let Some(x) = _find_tree(tree, &chunk) {
-        //     println!("\rPath: {:?}", x);
-        //     tree_paths.extend(x);
-        // }
-        if let Some(x) = tree_lookup.get(&chunk) {
-            tree_paths.extend(x.to_vec());
+        print!("\rQuerying lookup table... Done!\nCompiling data...");
+    } else {
+        print!("\rSorting lookup table... Done!\nWalking paths...");
+        let _ = std::io::stdout().flush();
+        while cursor < datablen {
+            print!("\rWalking paths... {}%", cursor * 100 / datablen);
+            let _ = std::io::stdout().flush();
+            if cursor + chunksize > datablen {
+                let spillover = (cursor + chunksize) - datablen;
+                if zerofill {
+                    chunk = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
+                    if let Some(x) = _find_tree(tree, &chunk) {
+                        println!("\rPath: {:?}", x);
+                        tree_paths.extend(x);
+                    }
+                }
+                break;
+            }
+            chunk = datab[cursor..cursor + chunksize].to_vec();
+            if let Some(x) = _find_tree(tree, &chunk) {
+                tree_paths.extend(x);
+            }
+            cursor += chunksize;
         }
-        cursor += chunksize;
+        print!("\rWalking paths... Done!\nCompiling data...");
     }
-    println!("\rWalking paths... Done!");
+    let _ = std::io::stdout().flush();
+    let tree_construction = deconstruct_tree(tree);
+    let tree_values = concat_tree(tree);
     let _ = std::io::stdout().flush();
     let mut remainder = 0;
     let mut finaldata = [
@@ -332,6 +387,7 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
     if remainder >= 1 {
         finaldata[index + 2] = true;
     }
+    println!("\rCompiling data... Done!");
     finaldata
 }
 
@@ -469,19 +525,27 @@ fn _find_tree(tree: &Tree, chunk: &[bool]) -> Option<Vec<bool>> {
     })
 }
 
-fn lookup_tree(tree: &Tree, path: &[bool]) -> HashMap<Vec<bool>, Vec<bool>> {
+fn lookup_tree(tree: &Tree, path: &[bool], compressing: bool) -> HashMap<Vec<bool>, Vec<bool>> {
     let mut result = HashMap::new();
     let subpath = [path, &[false]].concat();
     if let NodeType::Value(x) = &tree.head {
-        result.insert(x.to_vec(), subpath);
+        if compressing {
+            result.insert(x.to_vec(), subpath);
+        } else {
+            result.insert(subpath, x.to_vec());
+        }
     } else if let NodeType::Tree(subtree) = &tree.head {
-        result.extend(lookup_tree(subtree, &subpath));
+        result.extend(lookup_tree(subtree, &subpath, compressing));
     }
     let subpath = [path, &[true]].concat();
     if let NodeType::Value(x) = &tree.tail {
-        result.insert(x.to_vec(), subpath);
+        if compressing {
+            result.insert(x.to_vec(), subpath);
+        } else {
+            result.insert(subpath, x.to_vec());
+        }
     } else if let NodeType::Tree(subtree) = &tree.tail {
-        result.extend(lookup_tree(subtree, &subpath));
+        result.extend(lookup_tree(subtree, &subpath, compressing));
     }
     result
 }
