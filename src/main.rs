@@ -140,12 +140,14 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
     datab.drain(datab.len() - trimmer as usize..);
     cursor += 3;
     print!("Constructing tree...");
+    let _ = std::io::stdout().flush();
     let mut tree = Tree::new();
     while !check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
         construct_tree(&mut tree, datab[cursor]);
         cursor += 1;
     }
     print!("\rConstructing tree... Done!\nPopulating tree...");
+    let _ = std::io::stdout().flush();
     let mut tmpval = Vec::new();
     while !check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
         while tmpval.len() < blocklen {
@@ -156,6 +158,7 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
         tmpval = Vec::new();
     }
     print!("\rPopulating tree... Done!\n");
+    let _ = std::io::stdout().flush();
     while cursor < datab.len() {
         tmpval.push(datab[cursor]);
         cursor += 1;
@@ -169,6 +172,7 @@ fn decompress_data(data: &[u8]) -> Vec<bool> {
 
 fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
     print!("Reading metadata...");
+    let _ = std::io::stdout().flush();
     let blocked_blockbytes = chunksize.to_le_bytes();
     let bbl: u8;
     let blockbytes = if blocked_blockbytes[1] == 0 {
@@ -199,6 +203,7 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
         );
     }
     print!("\rReading metadata... Done!\nConstructing lookup table...");
+    let _ = std::io::stdout().flush();
     let mut dictionary = Vec::<Dictionary>::new();
     let mut block;
     while cursor < datab.len() {
@@ -206,6 +211,7 @@ fn compress_data(data: &[u8], chunksize: usize, zerofill: bool) -> Vec<bool> {
             let spillover = (cursor + chunksize) - datab.len();
             if zerofill {
                 println!("\rPerforming zero fill. Expect volatile behaviour.");
+                let _ = std::io::stdout().flush();
                 block = [datab[cursor..].to_vec(), vec![false; chunksize - spillover]].concat();
                 match dictionary
                     .iter()
