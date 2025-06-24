@@ -1,75 +1,59 @@
 use std::{
     env,
-    fs::File,
+    fs::{File, remove_file},
     io::{Read, Write},
 };
 
 fn main() {
     println!("On your marks...");
     let args: Vec<String> = env::args().collect();
-    let infilename = match args.iter().position(|x| x == "-i" || x == "--input") {
-        Some(x) => &args[x + 1],
-        None => {
-            println!("Missing input filename!");
-            return;
-        }
-    };
-    let outfilename = match args.iter().position(|x| x == "-o" || x == "--output") {
-        Some(x) => &args[x + 1],
-        None => {
-            println!("Missing output filename!");
-            return;
-        }
-    };
-    let force = args.iter().any(|x| x == "-f" || x == "--force");
+    let mut force = false;
+    let mut infilename = "";
+    let mut outfilename = "";
     let mut blocksize = 0u32;
-    let compression = match args
-        .iter()
-        .any(|x| x == "-c" || x == "--compress" || x == "--deflate")
-    {
-        true => {
-            if args
-                .iter()
-                .any(|y| y == "-d" || y == "--decompress" || y == "--inflate")
-            {
-                println!("Cannot compress and decompress at the same time!");
-                return;
-            } else {
-                match args.iter().position(|x| x == "-b" || x == "--blocksize") {
-                    Some(x) => match args[x + 1].parse::<u32>() {
-                        Ok(x) => {
-                            if x < 1 {
-                                println!("Block size is too small!");
-                                return;
-                            }
-                            blocksize = x;
-                            true
-                        }
-                        Err(_) => {
-                            println!("Invalid block size!");
-                            return;
-                        }
-                    },
-                    None => {
-                        println!("Missing block size!");
+    let mut compression = false;
+    for (i, arg) in args.iter().enumerate() {
+        if arg.starts_with("--") {
+            match arg.strip_prefix("--").unwrap_or_default() {
+                "force" => force = true,
+                "input" => infilename = &args[i + 1],
+                "output" => outfilename = &args[i + 1],
+                "compress" | "deflate" => compression = true,
+                "decompress" | "inflate" => compression = false,
+                "blocksize" => blocksize = args[i + 1].parse().unwrap_or(0u32),
+                _ => {
+                    println!("Expected long-name parameter.")
+                }
+            }
+        } else if arg.starts_with("-") {
+            let mut index = 1;
+            for char in arg.strip_prefix("-").unwrap_or_default().chars() {
+                match char {
+                    'f' => {
+                        force = true;
+                    }
+                    'i' => {
+                        infilename = &args[i + index];
+                        index += 1;
+                    }
+                    'o' => {
+                        outfilename = &args[i + index];
+                        index += 1;
+                    }
+                    'c' => compression = true,
+                    'd' => compression = false,
+                    'b' => {
+                        blocksize = args[i + index].parse().unwrap_or(0u32);
+                        index += 1;
+                    }
+                    _ => {
+                        println!("Expected short-name parameter or collection of.");
                         return;
                     }
-                };
-                true
+                }
             }
         }
-        false => {
-            if args
-                .iter()
-                .any(|y| y == "-d" || y == "--decompress" || y == "--inflate")
-            {
-                false
-            } else {
-                println!("Missing de/compression flag!");
-                return;
-            }
-        }
-    };
+    }
     let mut rawdata = Vec::new();
     let _ = match File::open(infilename) {
         Ok(mut f) => f.read_to_end(&mut rawdata),
@@ -114,9 +98,19 @@ fn main() {
                 .fold(0u8, |acc, bit| (acc << 1) | (if bit { 1 } else { 0 }))
         })
         .collect::<Vec<u8>>();
-    let _ = file.write_all(&data);
-    let _ = file.flush();
-    println!("Done!");
+    if !data.is_empty() {
+        let _ = file.write_all(&data);
+        let _ = file.flush();
+        println!("Done!");
+    } else {
+        match remove_file(outfilename) {
+            Ok(_) => println!("Program failed! file {} was removed.", outfilename),
+            Err(e) => println!(
+                "Program failed! Additionally, program could not remove file {} due to {}.",
+                outfilename, e
+            ),
+        }
+    }
 }
 
 fn decompress_data(data: &[u8]) -> Vec<bool> {
@@ -274,7 +268,7 @@ fn compress_data(data: &[u8], chunksize: u32) -> Vec<bool> {
     }
     if block != Vec::new() {
         println!(
-            "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen.!",
+            "\rData spillover of {} bits; data requires an additional {} bits to fill the required blocklen!",
             block.len(),
             chunksize - block.len() as u32
         );
