@@ -122,97 +122,46 @@ fn main() {
 
 fn decompress_data(data: &[u8]) -> Vec<bool> {
     let mut finaldata = Vec::<bool>::new();
-    let mut blockbytes = 6u8;
-    let mut blocklen = 0usize;
-    let mut trimmer = 9u8;
+    let mut datab: Vec<bool> = data
+        .iter()
+        .flat_map(|&byte| (0..8).rev().map(move |bit| (byte & (1 << bit)) != 0))
+        .collect();
+    let mut cursor = 0;
+    let blockbytes: u8 = ((datab[cursor] as u8) << 1) | (datab[cursor + 1] as u8 + 1);
+    cursor += 2;
+    let mut result = Vec::new();
+    for _ in 0..blockbytes {
+        result.extend_from_slice(&datab[cursor..cursor + 8]);
+        cursor += 8;
+    }
+    let blocklen = result.iter().fold(0, |acc, &x| acc * 2 + x as usize);
+    let trimmer =
+        ((datab[cursor] as u8) << 2) | ((datab[cursor + 1] as u8) << 1) | datab[cursor + 2] as u8;
+    datab.drain(datab.len() - trimmer as usize..);
+    cursor += 3;
+    print!("Constructing tree...");
     let mut tree = Tree::new();
-    let mut byte = 0usize;
+    while !check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
+        construct_tree(&mut tree, datab[cursor]);
+        cursor += 1;
+    }
+    print!("\rConstructing tree... Done!\nPopulating tree...");
     let mut tmpval = Vec::new();
-    let mut mode = 0u8;
-    let mut maxsize = 8u8;
-    loop {
-        for bit in 0..maxsize {
-            let bitvalue = (data[byte] >> (7 - bit)) & 1 == 1;
-            match mode {
-                0 => {
-                    if blockbytes == 6u8 {
-                        blockbytes = 5u8;
-                        continue;
-                    } else if blockbytes == 5u8 {
-                        let bit1 = (data[byte] >> (8 - bit)) & 1;
-                        blockbytes = ((bit1) << 1 | (bitvalue as u8)) + 1;
-                        let mut result = Vec::new();
-                        for _ in 0..blockbytes {
-                            for j in 2..8 {
-                                result.push((data[byte] >> (7 - j)) & 1 == 1);
-                            }
-                            for j in 0..2 {
-                                result.push((data[byte + 1] >> (7 - j)) & 1 == 1);
-                            }
-                            byte += 1;
-                        }
-                        blocklen = result.iter().fold(0, |acc, &x| acc * 2 + x as usize);
-                        mode = 1;
-                        continue;
-                    }
-                }
-                1 => {
-                    if trimmer == 9u8 {
-                        trimmer = 8u8;
-                        continue;
-                    } else if trimmer == 8u8 {
-                        let bit1 = (data[byte] >> (8 - bit)) & 1;
-                        let bit2 = (data[byte] >> (7 - bit)) & 1;
-                        let bit3 = (data[byte] >> (6 - bit)) & 1;
-                        trimmer = (bit1) << 2 | (bit2) << 1 | (bit3);
-                        continue;
-                    } else {
-                        print!("Constructing tree...");
-                        mode = 2;
-                        continue;
-                    }
-                }
-                2 => {
-                    construct_tree(&mut tree, bitvalue);
-                    if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Empty)) {
-                        print!("\rConstructing tree... Done!\nPopulating tree...");
-                        mode = 3;
-                    }
-                }
-                3 => {
-                    if tmpval.len() < blocklen {
-                        tmpval.push(bitvalue);
-                    }
-                    if tmpval.len() == blocklen {
-                        fill_tree(&mut tree, &tmpval);
-                        tmpval = Vec::new();
-                        if check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
-                            print!("\rPopulating tree... Done!\n");
-                            mode = 4;
-                            continue;
-                        }
-                    }
-                }
-                4 => {
-                    tmpval.push(bitvalue);
-                    match read_tree(&tree, &tmpval) {
-                        Some(x) => {
-                            finaldata.extend_from_slice(&x);
-                            tmpval = Vec::new();
-                        }
-                        _ => continue,
-                    }
-                }
-                _ => {}
-            }
+    while !check_tree(&tree, &mut |n: &NodeType| matches!(n, NodeType::Data)) {
+        while tmpval.len() < blocklen {
+            tmpval.push(datab[cursor]);
+            cursor += 1;
         }
-        if data.len() > byte + 1 {
-            byte += 1;
-            if data.len() == byte + 1 {
-                maxsize = 8 - trimmer;
-            }
-        } else {
-            break;
+        fill_tree(&mut tree, &tmpval);
+        tmpval = Vec::new();
+    }
+    print!("\rPopulating tree... Done!\n");
+    while cursor < datab.len() {
+        tmpval.push(datab[cursor]);
+        cursor += 1;
+        if let Some(x) = read_tree(&tree, &tmpval) {
+            finaldata.extend_from_slice(&x);
+            tmpval = Vec::new();
         }
     }
     finaldata
